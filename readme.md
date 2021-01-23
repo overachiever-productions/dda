@@ -1,5 +1,4 @@
-﻿# Dynamic Data Audits
-
+# Dynamic Data Audits
 ## Overview 
 Dynamic Data Audits (DDA) provide two main benefits: 
 1. Deploy and Forget triggers that dynamically capture INSERT, UPDATE, DELETE details without requiring developers to [create boilerplate-ish triggers] or 'touch'/ALTER trigger definitions any time schema of the underlying table is changed (i.e., add/remove or rename a column? no biggie, DDA Triggers don't care, they'll keep working without need of updates).
