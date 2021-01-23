@@ -84,14 +84,6 @@ AS
 
 	-- INSERT/DELETE: grab everything.
 	IF UPPER(@operationType) IN (N'INSERT', N'DELETE') BEGIN 
-
-		SELECT
-			@key = @key + CASE WHEN @operationType = N'INSERT' THEN N'[i].' ELSE N'[d].' END + QUOTENAME([result]) + N' [' + [result] + N'], '
-		FROM 
-			dda.[split_string](@pkColumns, N',', 1) 
-		ORDER BY 
-			row_id;
-
 		SET @sql = REPLACE(@sql, N'{AUDIT_COLUMNS}', CASE WHEN @operationType = N'INSERT' THEN N'i.*' ELSE N'd.*' END);
 		SET @sql = REPLACE(@sql, N'{AUDIT_FROM}', CASE WHEN @operationType = N'INSERT' THEN N'#temp_inserted i' ELSE N'#temp_deleted d' END);
 	END;
@@ -108,7 +100,7 @@ AS
 
 		DECLARE @columnNames nvarchar(MAX) = N'';
 		SELECT
-			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [detail.' + [column_name] + N'.from], ' + @crlf + @tab + @tab + N'[i].' + QUOTENAME([column_name]) + N' [detail.' + [column_name] + N'.to], '
+			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.from], ' + @crlf + @tab + @tab + N'[i].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.to], '
 		FROM 
 			dda.[translate_modified_columns](@auditedTable, @changeMap)
 		WHERE 
@@ -121,8 +113,7 @@ AS
 		DECLARE @from nvarchar(MAX) = N'#temp_deleted d ' + @crlf + @tab + @tab + N'INNER JOIN #temp_inserted i ON ';
 
 		SELECT
-			@join = @join + N'[d].' + QUOTENAME([result]) + N' = [i].' + QUOTENAME([result]) + N' AND ', 
-			@key = @key + N'[d].' + QUOTENAME([result]) + N' [key.' + [result] + N'], ' + @crlf + @tab + @tab
+			@join = @join + N'[d].' + QUOTENAME([result]) + N' = [i].' + QUOTENAME([result]) + N' AND ' 
 		FROM 
 			dda.[split_string](@pkColumns, N',', 1) 
 		ORDER BY 
@@ -130,8 +121,6 @@ AS
 
 		SET @join = LEFT(@join, LEN(@join) - 4);
 		SET @from = @from + @join;
-
-		SET @columnNames = @key + @columnNames;
 
 		SET @sql = REPLACE(@sql, N'{AUDIT_COLUMNS}', @columnNames);
 		SET @sql = REPLACE(@sql, N'{AUDIT_FROM}', @from);
@@ -143,19 +132,27 @@ AS
 		N'@json nvarchar(MAX) OUTPUT', 
 		@json = @json OUTPUT;
 
-	IF UPPER(@operationType) IN (N'INSERT', N'DELETE') BEGIN 
-		SET @key = LEFT(@key, LEN(@key) -1);
 
-		DECLARE @keyOutput nvarchar(MAX);
-		SET @sql = N'SELECT @keyOutput = (SELECT ' + @key + N' FROM ' + CASE WHEN @operationType = N'INSERT' THEN N'#temp_inserted i' ELSE N'#temp_deleted d' END + N' FOR JSON PATH);';
+	-- Define + Populate Key Info:
+	SELECT
+		@key = @key + CASE WHEN @operationType = N'INSERT' THEN N'[i].' ELSE N'[d].' END + QUOTENAME([result]) + N' [' + [result] + N'], '
+	FROM 
+		dda.[split_string](@pkColumns, N',', 1) 
+	ORDER BY 
+		row_id;
 
-		EXEC sp_executesql
-			@sql, 
-			N'@keyOutput nvarchar(MAX) OUTPUT', 
-			@keyOutput = @keyOutput OUTPUT;
+	SET @key = LEFT(@key, LEN(@key) -1);
+
+	DECLARE @keyOutput nvarchar(MAX);
+	SET @sql = N'SELECT @keyOutput = (SELECT ' + @key + N' FROM ' + CASE WHEN @operationType = N'INSERT' THEN N'#temp_inserted i' ELSE N'#temp_deleted d' END + N' FOR JSON PATH);';
+
+	EXEC sp_executesql
+		@sql, 
+		N'@keyOutput nvarchar(MAX) OUTPUT', 
+		@keyOutput = @keyOutput OUTPUT;
 		
-		SET @json = N'[{"key":' + @keyOutput + N', "detail":' + @json + N'}]';
-	END;
+	-- Bind Key + Detail Elements (manually) into a new JSON object:
+	SET @json = N'[{"key":' + @keyOutput + N', "detail":' + @json + N'}]';
 
 	INSERT INTO [dda].[audits] (
 		[timestamp],
