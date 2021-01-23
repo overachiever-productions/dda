@@ -1,0 +1,4 @@
+## exclusions... 
+/Deployment/__build/build.log.txt
+.scratch
+*~~*
