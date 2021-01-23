@@ -6,10 +6,10 @@ BUILD PROTOTYPE SYNTAX:
 	"description" = brief overview of what changes were made/added. 
 
 SAMPLE BUILD COMMAND/EXECUTION:
-> S4BuildPrototype.exe current.build.sql 5.x "This is what is in 5.x" 
+> DDABuildPrototype.exe current.build.sql 5.x "This is what is in 5.x" 
 
 --------------------------------------------------------------------------------------------------------
-BUILD DIRECTIVES HANDLED BY S4Build(Prototype).exe: 
+BUILD DIRECTIVES HANDLED BY DDABuild(Prototype).exe: 
 
 	--##NOTE: sample comment here...  		
 		comment or note - won't be output into the final/projected .sql file. 
@@ -21,9 +21,9 @@ BUILD DIRECTIVES HANDLED BY S4Build(Prototype).exe:
 
 	--##INCLUDE: Folder\file_name.sql 
 		root relative path to a .sql file to include as part of the output/build. 
-		e.g., if we want to include S4\S4 Performance\list_processes.sql 
+		e.g., if we want to include DDA\DDA Performance\list_processes.sql 
 			then we'd simply define a directive in the form of: 
-				--##INCLUDE: S4 Performance\list_processes.sql 
+				--##INCLUDE: DDA Performance\list_processes.sql 
 
 			NOTE: if the path defined does not exist or match a .sql file the Build Tool will throw an exception.
 
@@ -37,7 +37,7 @@ BUILD DIRECTIVES HANDLED BY S4Build(Prototype).exe:
 
 				b)? ... i got distracted? what? the 'docs' here are missing. 
 				that said: 
-					1... there's some info in the S4BuildPrototype that shows how this stuff is handled. 
+					1... there's some info in the DDABuildPrototype that shows how this stuff is handled. 
 					2... there's an example of this functionality in dbo.generate_audit_signature;
 				 3. there's an example of CONDITIONAL_VERSION in dbo.list_synchronizing_databases
 
@@ -74,8 +74,8 @@ TODO:
 
 	-- make {copyright} a better token. 
 
-	-- S4BuildPrototype.exe is a brute-force (proof of concept) tool at present. 
-		rewrite using design patterns, and then add to S4 as an additional 'bit' of code... 
+	-- DDABuildPrototype.exe is a brute-force (proof of concept) tool at present. 
+		rewrite using design patterns, and then add to DDA as an additional 'bit' of code... 
 
 	-- Create a PS1 file that asks for a Maj.Min and a description
 		and have it be the 'default' build file - i.e., point it at current.build.sql 
