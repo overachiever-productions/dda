@@ -1,7 +1,7 @@
-DROP PROC IF EXISTS dda.list_deployed_triggers; 
+DROP PROC IF EXISTS dda.list_dynamic_triggers; 
 GO 
 
-CREATE PROC dda.list_deployed_triggers 
+CREATE PROC dda.list_dynamic_triggers 
 
 AS 
 	SET NOCOUNT ON; 
@@ -24,7 +24,6 @@ AS
 		INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id]
 	WHERE 
 		p.[name] = N'DDATrigger' AND p.[value] = 'true';
-
 
 	RETURN 0;
 GO
