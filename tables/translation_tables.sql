@@ -1,4 +1,3 @@
-
 IF OBJECT_ID('dda.translation_tables') IS NULL BEGIN
 
 	CREATE TABLE dda.translation_tables (

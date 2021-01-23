@@ -1,6 +1,5 @@
 /*
 
-
 EXEC dda.[get_audit_data]
 	@StartTime = '2021-01-01 18:55:05',
 	@EndTime = '2021-01-30 18:55:05',
@@ -12,9 +11,6 @@ EXEC dda.[get_audit_data]
 	--@FromIndex = 4,
 	--@ToIndex = 6
 
-
-
-
 -- TODO: move these (comments) OUT of the sproc body and into docs:
 	-- Biz Rules: 
 	-- @StartTime can be specified without @EndTime (set @EndTime = GETDATE()). 
@@ -23,10 +19,7 @@ EXEC dda.[get_audit_data]
 	-- @TargetTable or @TargetUser can be queried WITHOUT times. 
 	-- In short: there ALWAYS has to be at LEAST 1x WHERE clause/predicate - but more are always welcome.
 
-
-
 */
-
 
 DROP PROC IF EXISTS dda.[get_audit_data];
 GO
