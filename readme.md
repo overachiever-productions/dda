@@ -141,7 +141,7 @@ A. Sample entry for INSERT or DELETE details - scalar values only:
 
 ```
 
-B. UPDATE variant - each modified column contains an array showing from (before) and to (after) values from the change: 
+B. UPDATE variant - each modified column contains 2 child-elements showing `from` and `to` elements (i.e., before and after values) from the change: 
 
 ```json
 
@@ -150,10 +150,10 @@ B. UPDATE variant - each modified column contains an array showing from (before)
 			"from": 182, 
 			"to": 77
 		}], 
-		"ModifiedDate": [{
+		"ModifiedDate": {
 			"from":"2021-01-08", 
 			"to":"2021-01-22"
-		}]
+		}
 
 	}]
 
@@ -198,14 +198,14 @@ B. Example of an UPDATE - where the item/inventory-count for a specific product 
     }], 
     
 	"detail": [{
-		"InventoryCount": [{
+		"InventoryCount": {
 			"from": 182, 
 			"to": 77
-		}], 
-		"ModifiedDate": [{
+		}, 
+		"ModifiedDate": {
 			"from":"2021-01-08", 
 			"to":"2021-01-22"
-		}]
+		}
 
 	}]    
 }]
