@@ -1,23 +1,35 @@
 /*
 
-EXEC dda.[get_audit_data]
-	@StartTime = '2021-01-01 18:55:05',
-	@EndTime = '2021-01-30 18:55:05',
-	--@TargetUsers = N'',
-	--@TargetTables = N'',
-	@TransformOutput = 1,
-	@FromIndex = 1, 
-	@ToIndex = 20;
-	--@FromIndex = 4,
-	--@ToIndex = 6
+	EXAMPLE (lame) Signatures:
 
--- TODO: move these (comments) OUT of the sproc body and into docs:
-	-- Biz Rules: 
-	-- @StartTime can be specified without @EndTime (set @EndTime = GETDATE()). 
-	-- @EndTime can NOT be specified without @StartTime (we could set @StartTime = MIN(audit_date), but that's just goofy semantics). 
-	-- We CAN query without @StartTime/@EndTime IF we have either @TargetUser or @TargetTable (or both). 
-	-- @TargetTable or @TargetUser can be queried WITHOUT times. 
-	-- In short: there ALWAYS has to be at LEAST 1x WHERE clause/predicate - but more are always welcome.
+			EXEC dda.[get_audit_data]
+				@StartTime = '2021-01-01 18:55:05',
+				@EndTime = '2021-01-30 18:55:05',
+				--@TargetUsers = N'',
+				--@TargetTables = N'',
+				@TransformOutput = 1,
+				@FromIndex = 1, 
+				@ToIndex = 20;
+				--@FromIndex = 4,
+				--@ToIndex = 6
+
+			EXEC dda.[get_audit_data]
+				@TargetUsers = N'sa, bilbo',
+				@TargetTables = N'SortTable,Errors',
+				@FromIndex = 1,
+				@TransformOutput = 1,
+				@ToIndex = 10;
+
+
+
+	TODO: 
+		move these (comments) OUT of the sproc body and into docs:
+			-- Biz Rules: 
+			-- @StartTime can be specified without @EndTime (set @EndTime = GETDATE()). 
+			-- @EndTime can NOT be specified without @StartTime (we could set @StartTime = MIN(audit_date), but that's just goofy semantics). 
+			-- We CAN query without @StartTime/@EndTime IF we have either @TargetUser or @TargetTable (or both). 
+			-- @TargetTable or @TargetUser can be queried WITHOUT times. 
+			-- In short: there ALWAYS has to be at LEAST 1x WHERE clause/predicate - but more are always welcome.
 
 */
 
@@ -111,15 +123,45 @@ WHERE
 	END;
 
 	IF @TargetUsers IS NOT NULL BEGIN 
-		SET @users = N'[user] = ''' + @TargetUsers + N''' ';
-		IF @predicated = 1 SET @users = N'AND ' + @users;
+		IF @TargetUsers LIKE N'%,%' BEGIN 
+			SET @users  = N'[user] IN (';
 
+			SELECT 
+				@users = @users + N'''' + [result] + N''', '
+			FROM 
+				dda.[split_string](@TargetUsers, N',', 1)
+			ORDER BY 
+				[row_id];
+
+			SET @users = LEFT(@users, LEN(@users) - 1) + N') ';
+
+		  END;
+		ELSE BEGIN 
+			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
+		END;
+		
+		IF @predicated = 1 SET @users = N'AND ' + @users;
 		SET @predicated = 1;
 	END;
 
 	IF @TargetTables IS NOT NULL BEGIN
--- TODO: need ... schema + table here... i.e., substitute-in dbo. if schema isn't specified (per table).
-		SET @tables = N'[table] = nnnn ';  
+		IF @TargetTables LIKE N'%,%' BEGIN 
+			SET @tables = N'[table] IN (';
+
+			SELECT
+				@tables = @tables + N'''' + [result] + N''', '
+			FROM 
+				dda.[split_string](@TargetTables, N',', 1)
+			ORDER BY 
+				[row_id];
+
+			SET @tables = LEFT(@tables, LEN(@tables) -1) + N') ';
+
+		  END;
+		ELSE BEGIN 
+			SET @tables = N'[table] = ''' + @TargetTables +''' ';  
+		END;
+		
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
 
@@ -158,6 +200,7 @@ WHERE
 		N'@FromIndex int, @ToIndex int', 
 		@FromIndex = @FromIndex, 
 		@ToIndex = @ToIndex;
+	
 	SELECT @matchedRows = @@ROWCOUNT;
 
 	-- short-circuit options for transforms:
@@ -185,12 +228,15 @@ WHERE
 		[row_number] int NOT NULL,
 		[table] sysname NOT NULL, 
 		[column] sysname NOT NULL, 
+		[type] int NOT  NULL,
 		[translated_column] sysname NULL, 
 		[value] nvarchar(MAX) NULL, -- TODO: should I allow nulls here? 
 		[translated_value] sysname NULL, 
 		[from_value] nvarchar(MAX) NULL, 
+		[from_value_type] int NULL, 
 		[translated_from_value] sysname NULL, 
 		[to_value] sysname NULL, 
+		[to_value_type] int NULL,
 		[translated_to_value] sysname NULL, 
 		[translated_update_value] nvarchar(MAX) NULL
 	);
@@ -215,30 +261,30 @@ WHERE
 		[table],
 		[row_number],
 		[column],
+		[type],
 		[value]
 	)
 	SELECT 
 		N'key',
 		x.[table], 
 		x.[row_number],
-		z.[Key] [column], 
-		z.[Value] [value]
+		y.[Key] [column], 
+		y.[Type] [type],
+		y.[Value] [value] 
 	FROM 
 		[#raw_data] x
--- TODO: pay attention to OPENJASON()'s .type result/property: https://docs.microsoft.com/en-us/sql/t-sql/functions/openjson-transact-sql?view=sql-server-ver15#return-value 
---		that full-blown shows/tracks data-types - which I could/should be able to use to help 'drive' translations if/as needed. (translation_values COULD end up having a data-type associated - 
---			i.e., lol, translation_value_number, translation_value_string, translation_value_bool, translation_value_date (which... hmm... is 'missing' guess it's just text - 
---					yeah, I'd treat anything other than numbers as ... strings... ) ... but still, strings vs non-strings would be great... 
 		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
+		CROSS APPLY OPENJSON(z.[Value], N'$') y
 	WHERE 
-		z.[Key] IS NOT NULL 
-		AND z.[Value] IS NOT NULL;
+		y.[Key] IS NOT NULL 
+		AND y.[Value] IS NOT NULL;
 
 	INSERT INTO [#key_value_pairs] (
 		[kvp_type],
 		[table],
 		[row_number],
 		[column],
+		[type],
 		[value]
 	)
 	SELECT 
@@ -246,18 +292,23 @@ WHERE
 		x.[table], 
 		x.[row_number],
 		y.[Key] [column], 
+		y.[Type] [type],
 		y.[Value] [value]
 	FROM 
 		[#raw_data] x 
-		CROSS APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') y
+		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
+		CROSS APPLY OPENJSON(z.[Value], N'$') y
 	WHERE 
-		y.[Key] <> 'row_identifier'
+		y.[Key] IS NOT NULl
 		AND y.[Value] IS NOT NULL;
-		
+
+-- TODO: account for type changes to/from NULL - i.e., type = 0: https://docs.microsoft.com/en-us/sql/t-sql/functions/openjson-transact-sql?view=sql-server-ver15#return-value
 	UPDATE [#key_value_pairs] 
 	SET 
-		from_value = JSON_VALUE([value], N'$.from'), 
-		to_value = JSON_VALUE([value], N'$.to')
+		[from_value] = JSON_VALUE([value], N'$.from'), 
+		[from_value_type] = CASE WHEN [value] LIKE N'%"from":"%' THEN 1 ELSE 0 END,
+		[to_value] = JSON_VALUE([value], N'$.to'),
+		[to_value_type] = CASE WHEN [value] LIKE N'%,"to":"%' THEN 1 ELSE 0 END 
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
@@ -279,6 +330,7 @@ WHERE
 			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
 			AND x.[value] NOT LIKE N'{"from":%"to":%';
 
+	-- State from/to value translations:
 	UPDATE x 
 	SET
 		x.[translated_from_value] = v.[translation_value]
@@ -302,24 +354,46 @@ WHERE
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
-		[translated_update_value] = N'{"from":"' + ISNULL([translated_from_value], [from_value]) + N'", "to":"' + ISNULL([translated_to_value], [to_value]) + N'"}'
+		[translated_update_value] = N'{"from":' + CASE 
+				WHEN [from_value_type] = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"' 
+				ELSE ISNULL([translated_from_value], [from_value])
+			END + N', "to":' + CASE 
+				WHEN [to_value_type] = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
+				ELSE + ISNULL([translated_to_value], [to_value])
+			END + N'}'
 	WHERE 
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
 
+-- PERF / TODO:
 	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
 -- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
 -- TODO: test this against a 'wide' table - I've only been testing narrow tables to this point... 
-	DELETE FROM [#key_value_pairs] 
-	WHERE 
-		[row_number] NOT IN (
-			SELECT [row_number] FROM [#key_value_pairs] 
-			WHERE 
-				[translated_column] IS NOT NULL 
-				OR [translated_value] IS NOT NULL 
-				OR [translated_update_value] IS NOT NULL 
-		);
+-- ACTUALLY, these aren't quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
+--	DELETE FROM [#key_value_pairs] 
+--	WHERE 
+--		[kvp_type] = N'key'
+--		AND [row_number] IN (
+--			SELECT [row_number] FROM [#key_value_pairs] 
+--			WHERE 
+--				[translated_column] IS NULL 
+--				AND [translated_value] IS NULL 
+--				AND [translated_update_value] IS NULL 
+--				AND [kvp_type] = N'key'
+--		);
+---- PERF: also, if I don't 'pre-exclude' these... then 2x passes here is crappy.
+--	DELETE FROM [#key_value_pairs] 
+--	WHERE 
+--		[kvp_type] = N'detail'
+--		AND [row_number] IN (
+--			SELECT [row_number] FROM [#key_value_pairs] 
+--			WHERE 
+--				[translated_column] IS NULL 
+--				AND [translated_value] IS NULL 
+--				AND [translated_update_value] IS NULL 
+--				AND [kvp_type] = N'detail'
+--		);
 
 	-- Collapse translations + non-translations down to a single working set: 
 	SELECT 
@@ -373,7 +447,7 @@ WHERE
 		[keys] AS (
 			SELECT 
 				x.[row_number], 
-				(SELECT [column] [key_col], [value] [key_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'key' /* ORDER BY xxx here*/ FOR JSON AUTO, WITHOUT_ARRAY_WRAPPER) [key_data]
+				(SELECT [column] [key_col], [value] [key_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'key' /* ORDER BY xxx here*/ FOR JSON AUTO) [key_data]
 			FROM 
 				[row_numbers] x 
 		), 
@@ -381,7 +455,7 @@ WHERE
 
 			SELECT 
 				x.[row_number],
-				(SELECT [column] [detail_col], [value] [detail_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'detail' /* ORDER BY xxx here*/ FOR JSON AUTO, WITHOUT_ARRAY_WRAPPER) [detail_data]
+				(SELECT [column] [detail_col], [value] [detail_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'detail' /* ORDER BY xxx here*/ FOR JSON AUTO) [detail_data]
 			FROM 
 				[row_numbers] x
 		)
@@ -405,14 +479,14 @@ WHERE
 			INNER JOIN keys k ON [r].[row_number] = [k].[row_number] 
 			INNER JOIN [details] d ON [r].[row_number] = [d].[row_number];
 
+-- TODO: I somehow lost the .type in here... i..e, I'm getting it from ... OPENJSON... which isn't viable - cuz everything has been reverted to a string... 
 		-- Keys Translation: 
 		WITH [streamlined] AS ( 
 			SELECT 
 				[row_number], 
 				[operation_type], 
 				[row_count], 
--- HACK (for now - i.e., need to remove the whole WITHOUT_ARRAY_WRAPPER directives up above...)
-				N'[' + [key_data] + N']' [data]
+				[key_data] [data]
 			FROM 
 				[#translated_data] 
 		), 
@@ -455,7 +529,6 @@ WHERE
 				[row_number]
 		)
 
-		--SELECT * FROM [shredded_keys];
 		UPDATE x 
 		SET 
 			x.[translated_change_key] = k.[translated_key]
@@ -471,8 +544,7 @@ WHERE
 				[row_number], 
 				[operation_type], 
 				[row_count], 
--- HACK (for now - i.e., need to remove the whole WITHOUT_ARRAY_WRAPPER directives up above...)
-				N'[' + [detail_data] + N']' [data]
+				[detail_data] [data]
 			FROM 
 				[#translated_data] 
 		), 
@@ -543,7 +615,7 @@ Final_Projection:
 		[operation_type],
 		[row_count],
 		CASE 
-			WHEN [translated_change_key] IS NOT NULL THEN N'[{"key":[' + [translated_change_key] + N'],"detail":[' + [translated_change_detail] + N']}]'
+			WHEN [translated_change_key] IS NOT NULL THEN N'[{"key":[{' + [translated_change_key] + N'}],"detail":[{' + [translated_change_detail] + N'}]}]'
 			ELSE [change_details]
 		END [change_details] 
 	FROM [#raw_data];

@@ -134,7 +134,7 @@ END;
 --##INCLUDE: utilities\update_trigger_definitions.sql
 
 -----------------------------------
---##INCLUDE: utilities\list_deployed_triggers.sql
+--##INCLUDE: utilities\list_dynamic_triggers.sql
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
