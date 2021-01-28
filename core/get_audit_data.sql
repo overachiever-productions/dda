@@ -83,6 +83,7 @@ AS
 	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
 	SELECT 
 		ROW_NUMBER() OVER (ORDER BY [timestamp]) [row_number],
+		[audit_id],
 		[timestamp],
 		[schema],
 		[table],
@@ -100,6 +101,7 @@ AS
 SELECT 
 	[row_number],
 	(SELECT COUNT(*) FROM [total]) [total_rows],
+	[audit_id],
 	[timestamp],
 	[schema] + N''.'' + [table] [table],
 	[user],
@@ -174,6 +176,7 @@ WHERE
 	CREATE TABLE #raw_data ( 
 		[row_number] int NOT NULL,
 		[total_rows] int NOT NULL, 
+		[audit_id] int NOT NULL,
 		[timestamp] datetime NOT NULL,
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
@@ -188,6 +191,7 @@ WHERE
 	INSERT INTO [#raw_data] (
 		[row_number],
 		[total_rows],
+		[audit_id],
 		[timestamp],
 		[table],
 		[user],
@@ -204,15 +208,7 @@ WHERE
 	SELECT @matchedRows = @@ROWCOUNT;
 
 	-- short-circuit options for transforms:
-	IF @matchedRows < 1 GOTO Final_Projection;
-	IF @TransformOutput <> 1 BEGIN
-		
-		UPDATE [#raw_data] 
-		SET 
-			[translated_table] = [table];
-
-		GOTO Final_Projection;
-	END;
+	IF (@matchedRows < 1) OR (@TransformOutput <> 1) GOTO Final_Projection;
 
 	-- table translations: 
 	UPDATE x 
@@ -228,16 +224,17 @@ WHERE
 		[row_number] int NOT NULL,
 		[table] sysname NOT NULL, 
 		[column] sysname NOT NULL, 
-		[type] int NOT  NULL,
 		[translated_column] sysname NULL, 
-		[value] nvarchar(MAX) NULL, -- TODO: should I allow nulls here? 
+		[value] nvarchar(MAX) NULL, -- TODO: should I allow nulls here? Or, more importantly: how to handle NULLs here? they may be <NULL> or something 'odd' from JSON (i.e., type 0).
+		[value_type] int NOT  NULL,
 		[translated_value] sysname NULL, 
+		[translated_value_type] int NULL,
 		[from_value] nvarchar(MAX) NULL, 
-		[from_value_type] int NULL, 
 		[translated_from_value] sysname NULL, 
+		[translated_from_value_type] int NULL,
 		[to_value] sysname NULL, 
-		[to_value_type] int NULL,
 		[translated_to_value] sysname NULL, 
+		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
 	);
 
@@ -250,7 +247,6 @@ WHERE
 --		d. may need to change the audit_trigger - so that it puts multi-row results into ... multiple 'rows' (so that I have a better 'handle' into the results?). 
 ---			that said... should be such that an ordinal could/would/should work? (i.e., just need to test that crap out).
 
-
 -- PERF: 
 --		in point b., above, I make a note of ONLY running 'shredding' ops for rows (with > 1 row-modified AND) where the table they're from is in the list of translation tables... 
 --			might make a lot of sense to do that for the other 2x initial shreds/transforms (keys, values) - i.e., predicate those with instructions to ONLY shred/transform for tables where
@@ -261,16 +257,16 @@ WHERE
 		[table],
 		[row_number],
 		[column],
-		[type],
-		[value]
+		[value],
+		[value_type]
 	)
 	SELECT 
 		N'key',
 		x.[table], 
 		x.[row_number],
 		y.[Key] [column], 
-		y.[Type] [type],
-		y.[Value] [value] 
+		y.[Value] [value],
+		y.[Type] [value_type]
 	FROM 
 		[#raw_data] x
 		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
@@ -284,16 +280,16 @@ WHERE
 		[table],
 		[row_number],
 		[column],
-		[type],
-		[value]
+		[value],
+		[value_type]
 	)
 	SELECT 
 		N'detail',
 		x.[table], 
 		x.[row_number],
 		y.[Key] [column], 
-		y.[Type] [type],
-		y.[Value] [value]
+		y.[Value] [value],
+		y.[Type] [value_type]
 	FROM 
 		[#raw_data] x 
 		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
@@ -302,13 +298,10 @@ WHERE
 		y.[Key] IS NOT NULl
 		AND y.[Value] IS NOT NULL;
 
--- TODO: account for type changes to/from NULL - i.e., type = 0: https://docs.microsoft.com/en-us/sql/t-sql/functions/openjson-transact-sql?view=sql-server-ver15#return-value
 	UPDATE [#key_value_pairs] 
 	SET 
 		[from_value] = JSON_VALUE([value], N'$.from'), 
-		[from_value_type] = CASE WHEN [value] LIKE N'%"from":"%' THEN 1 ELSE 0 END,
-		[to_value] = JSON_VALUE([value], N'$.to'),
-		[to_value_type] = CASE WHEN [value] LIKE N'%,"to":"%' THEN 1 ELSE 0 END 
+		[to_value] = JSON_VALUE([value], N'$.to')--,
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
@@ -322,7 +315,8 @@ WHERE
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]
+		x.[translated_value] = v.[translation_value], 
+		x.[translated_value_type] = v.[translation_value_type]
 	FROM 
 		[#key_value_pairs] x
 		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
@@ -330,10 +324,11 @@ WHERE
 			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
 			AND x.[value] NOT LIKE N'{"from":%"to":%';
 
-	-- State from/to value translations:
+	-- Stage from/to value translations:
 	UPDATE x 
 	SET
-		x.[translated_from_value] = v.[translation_value]
+		x.[translated_from_value] = v.[translation_value], 
+		x.[translated_from_value_type] = v.[translation_value_type]
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -343,7 +338,8 @@ WHERE
 
 	UPDATE x 
 	SET
-		x.[translated_to_value] = v.[translation_value]
+		x.[translated_to_value] = v.[translation_value], 
+		x.[translated_to_value_type] = v.[translation_value_type]
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -355,10 +351,10 @@ WHERE
 	UPDATE [#key_value_pairs] 
 	SET 
 		[translated_update_value] = N'{"from":' + CASE 
-				WHEN [from_value_type] = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"' 
+				WHEN [translated_from_value_type] = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"' 
 				ELSE ISNULL([translated_from_value], [from_value])
 			END + N', "to":' + CASE 
-				WHEN [to_value_type] = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
+				WHEN [translated_to_value_type] = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
 	WHERE 
@@ -396,222 +392,189 @@ WHERE
 --		);
 
 	-- Collapse translations + non-translations down to a single working set: 
+	WITH core AS ( 
+		SELECT 
+			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [id],
+			[kvp_type], 
+			[row_number], 
+			ISNULL([translated_column], [column]) [column], 
+			CASE 
+				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
+				ELSE ISNULL([translated_value], [value])
+			END [value], 
+			CASE 
+				WHEN [value_type] = 5 THEN 5 
+				ELSE ISNULL([translated_value_type], [value_type]) 
+			END [value_type]
+		FROM 
+			[#key_value_pairs]
+		WHERE 
+			[kvp_type] = N'key'
+	), 
+	[keys] AS (
+		SELECT 
+			[id],
+			[kvp_type],
+			COUNT(*) OVER (PARTITION BY [row_number]) [kvp_count], 
+			ROW_NUMBER() OVER (PARTITION BY [row_number] ORDER BY [id]) [current_kvp],
+			[row_number],
+			[column],
+			[value],
+			[value_type]
+		FROM 
+			core
+	)
+
 	SELECT 
-		[kvp_type], 
-		[row_number], 
-		[table], 
-		ISNULL([translated_column], [column]) [column], 
-		CASE 
-			WHEN [value] LIKE N'{"from":%"to":%' THEN ISNULL([translated_update_value], [value]) 
-			ELSE ISNULL([translated_value], [value])
-		END [value]
+		[id],
+		[row_number],
+		[kvp_type],
+		[kvp_count],
+		[current_kvp],
+		[column],
+		[value],
+		[value_type]
 	INTO 
 		#translated_kvps
 	FROM 
-		[#key_value_pairs];
+		keys;
 
-	CREATE TABLE #translated_data (
-		[row_number] int NOT NULL, 
-		[operation_type] char(9) NOT NULL,
-		[row_count] int NOT NULL,
-		[key_data] nvarchar(MAX) NOT NULL, 
-		[detail_data] nvarchar(MAX) NOT NULL
-	);
-
-	-- Process Translations: 
-	DECLARE @currentTranslationTable sysname;
-	DECLARE @translationSql nvarchar(MAX);
-	DECLARE [walker] CURSOR LOCAL FAST_FORWARD FOR 
-	SELECT DISTINCT 
-		[table]
-	FROM 
-		[#key_value_pairs];
-
-	OPEN [walker];
-	FETCH NEXT FROM [walker] INTO @currentTranslationTable;
-	
-	WHILE @@FETCH_STATUS = 0 BEGIN
-	
-		TRUNCATE TABLE [#translated_data];
-
-		WITH [row_numbers] AS ( 
-			SELECT 
-				[row_number]
-			FROM 
-				[#key_value_pairs]
-			WHERE 
-				[table] = @currentTranslationTable
-			GROUP BY 
-				[row_number]
-		),
-		[keys] AS (
-			SELECT 
-				x.[row_number], 
-				(SELECT [column] [key_col], [value] [key_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'key' /* ORDER BY xxx here*/ FOR JSON AUTO) [key_data]
-			FROM 
-				[row_numbers] x 
-		), 
-		[details] AS (
-
-			SELECT 
-				x.[row_number],
-				(SELECT [column] [detail_col], [value] [detail_val] FROM [#translated_kvps] x2 WHERE x2.[table] = @currentTranslationTable AND x.[row_number] = x2.[row_number] AND x2.[kvp_type] = N'detail' /* ORDER BY xxx here*/ FOR JSON AUTO) [detail_data]
-			FROM 
-				[row_numbers] x
-		)
-
-		INSERT INTO [#translated_data] (
-			[row_number],
-			[operation_type],
-			[row_count],
-			[key_data],
-			[detail_data]
-		)
+	WITH core AS ( 
 		SELECT 
-			[r].[row_number], 
-			[x].[operation_type], 
-			[x].[row_count],
-			[k].[key_data],
-			[d].[detail_data]
+			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [id],
+			[kvp_type], 
+			[row_number], 
+			[table], 
+			ISNULL([translated_column], [column]) [column], 
+			CASE 
+				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
+				ELSE ISNULL([translated_value], [value])
+			END [value], 
+			CASE 
+				WHEN [value_type] = 5 THEN 5 
+				ELSE ISNULL([translated_value_type], [value_type]) 
+			END [value_type]
 		FROM 
-			[row_numbers] r 
-			INNER JOIN [#raw_data] x ON [r].[row_number] = [x].[row_number]
-			INNER JOIN keys k ON [r].[row_number] = [k].[row_number] 
-			INNER JOIN [details] d ON [r].[row_number] = [d].[row_number];
-
--- TODO: I somehow lost the .type in here... i..e, I'm getting it from ... OPENJSON... which isn't viable - cuz everything has been reverted to a string... 
-		-- Keys Translation: 
-		WITH [streamlined] AS ( 
-			SELECT 
-				[row_number], 
-				[operation_type], 
-				[row_count], 
-				[key_data] [data]
-			FROM 
-				[#translated_data] 
-		), 
-		[shredded_keys] AS (
-			SELECT 
-				s.[row_number], 
-				s.[operation_type], 
-				s.[row_count],  -- NOT sure this is even needed... but... will have to address when I get to multi-row audit-records.
-				ROW_NUMBER() OVER(PARTITION BY s.[row_number] ORDER BY x.[Key], y.[Key]) [attribute_number], 
-				COUNT(*) OVER(PARTITION BY s.[row_number]) [attribute_count], 
-				y.[Key] [key], 
-				y.[Value] [value], 
-				y.[Type] [type]
-			FROM 
-				streamlined s
-				CROSS APPLY OPENJSON(JSON_QUERY(s.[data], N'$'), N'$') x 
-				CROSS APPLY OPENJSON(x.[Value], N'$') y
-		), 
-		[serialized_keys] AS ( 
-
-			SELECT 
-				[row_number],
-				STRING_AGG(
-					CASE 
-						WHEN [key] = N'key_col' THEN N'"' + [value] + N'":' 
-						ELSE 
-							CASE 
-								WHEN [type] = 2 THEN [value] 
-								ELSE N'"' + [value] + N'"'
-							END
-							+ 
-							CASE 
-								WHEN [attribute_number] = [attribute_count] THEN N''
-								ELSE N','
-							END
-					END, '') [translated_key]
-			FROM 
-				[shredded_keys]
-			GROUP BY 
-				[row_number]
-		)
-
-		UPDATE x 
-		SET 
-			x.[translated_change_key] = k.[translated_key]
-		FROM 
-			[#raw_data] x  
-			INNER JOIN [serialized_keys] k ON [x].[row_number] = [k].[row_number]
+			[#key_value_pairs]
 		WHERE 
-			x.[translated_change_key] IS NULL;
+			[kvp_type] = N'detail'
 
-		-- Details Translation:
-		WITH [streamlined] AS ( 
-			SELECT 
-				[row_number], 
-				[operation_type], 
-				[row_count], 
-				[detail_data] [data]
-			FROM 
-				[#translated_data] 
-		), 
-		[shredded_details] AS (
-			SELECT 
-				s.[row_number], 
-				s.[operation_type], 
-				s.[row_count],  -- NOT sure this is even needed... but... will have to address when I get to multi-row audit-records.
-				ROW_NUMBER() OVER(PARTITION BY s.[row_number] ORDER BY x.[Key], y.[Key]) [attribute_number], 
-				COUNT(*) OVER(PARTITION BY s.[row_number]) [attribute_count], 
-				y.[Key] [key], 
-				y.[Value] [value], 
-				y.[Type] [type]
-			FROM 
-				streamlined s
-				CROSS APPLY OPENJSON(JSON_QUERY(s.[data], N'$'), N'$') x 
-				CROSS APPLY OPENJSON(x.[Value], N'$') y
-		), 
-		[serialized_details] AS (
-
-			SELECT 
-				[row_number],
-				STRING_AGG(
-					CASE 
-						 WHEN [key] = N'detail_col' THEN N'"' + [value] + N'":' 
-						 ELSE 
-							CASE 
-								WHEN [operation_type] = N'UPDATE' THEN N'[' + [value] + N']'
-								ELSE 
-									CASE 
-										WHEN [type] = 2 THEN [value]
-										ELSE N'"' + [value] + N'"'
-									END
-							END
-							+ 
-							CASE 
-								WHEN [attribute_number] = [attribute_count] THEN N''
-								ELSE N','
-							END
-					END, '') [translated_detail]
-			FROM 
-				[shredded_details] 
-			GROUP BY 
-				[row_number]
-		)
-
-		UPDATE x 
-		SET 
-			x.[translated_change_detail] = d.[translated_detail]
+	), 
+	[details] AS (
+		SELECT 
+			[id],
+			[kvp_type],
+			COUNT(*) OVER (PARTITION BY [row_number]) [kvp_count], 
+			ROW_NUMBER() OVER (PARTITION BY [row_number] ORDER BY [id]) [current_kvp],
+			[row_number],
+			[column],
+			[value],
+			[value_type]
 		FROM 
-			[#raw_data] x 
-			INNER JOIN [serialized_details] d ON [x].[row_number] = [d].[row_number]
-		WHERE 
-			x.[translated_change_detail] IS NULL;
+			core
+	)
 
-		FETCH NEXT FROM [walker] INTO @currentTranslationTable;
-	END;
-	CLOSE [walker];
-	DEALLOCATE [walker];
+	INSERT INTO [#translated_kvps] (
+		[id],
+		[row_number],
+		[kvp_type],
+		[kvp_count],
+		[current_kvp],
+		[column],
+		[value],
+		[value_type]
+	)
+	SELECT 
+		[id],
+		[row_number],
+		[kvp_type],
+		[kvp_count],
+		[current_kvp],
+		[column],
+		[value],
+		[value_type]
+	FROM 
+		[details];
+
+		
+	-- Serialize KVPs (ordered by row_number) down to JSON: 
+	WITH [row_numbers] AS (
+		SELECT 
+			[row_number] 
+		FROM 
+			[#raw_data]
+		GROUP BY 
+			[row_number]
+	), 
+	[keys] AS ( 
+		SELECT 
+			[x].[row_number], 
+			(
+				SELECT 
+					STRING_AGG(
+						N'"' + [x2].[column] + N'":' +
+						CASE 
+							WHEN [x2].[value_type] = 2 THEN [x2].[value] 
+							ELSE N'"' + [x2].[value] + N'"'
+						END + 
+						CASE 
+							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
+							ELSE N','
+						END
+					, '')
+				FROM 
+					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
+				--ORDER BY 
+				--	[x2].[id]
+			) [key_data]
+		FROM 
+			[row_numbers] x
+
+	), 
+	[details] AS (
+		SELECT 
+			[x].[row_number], 
+			( 
+				SELECT 
+					STRING_AGG(
+						N'"' + [x2].[column] + N'":' +
+						CASE 
+							WHEN [x2].[value_type] IN (2, 5) THEN [x2].[value]   -- if it's a number or json/etc... just use the RAW value
+							ELSE N'"' + [x2].[value] + N'"'
+						END + 
+						CASE 
+							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
+							ELSE N','
+						END
+					, '')
+
+				FROM 
+					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
+				--ORDER BY 
+				--	[x2].[id]
+			) [detail_data]
+		FROM 
+			[row_numbers] x
+	)
+
+	UPDATE [x] 
+	SET 
+		[x].[translated_change_key] = k.[key_data], 
+		[x].[translated_change_detail] = d.[detail_data]
+
+	FROM 
+		[#raw_data] x 
+		INNER JOIN [keys] k ON [x].[row_number] = [k].[row_number]
+		INNER JOIN [details] d ON [x].[row_number] = [d].[row_number];
 
 Final_Projection:
 	SELECT 
 		[row_number],
 		[total_rows],
+		[audit_id],
 		[timestamp],
 		[user],
-		[translated_table] [table],
+		ISNULL([translated_table], [table]) [table],
 		[operation_type],
 		[row_count],
 		CASE 
