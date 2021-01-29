@@ -76,17 +76,17 @@ Dynamic Data Audits capabilities are made possible, primarily, via
 - **bullet per each UDF/Sproc Name.** and high-level overview of what they do here... 
 
 ### JSON Structure
-Each row/entry captured by Dynamic Data Audit Triggers will adhere to the following JSON structure. 
-
-At a high-level, each audit record consists of two elements/nodes:  
-- **key** - which contains 'identifying' information about the row being audited (i.e., either the primary key column(s) or defined surrogate key(s)/column(s)).
-- **detail** - which contains capture-info of the exact columns changed or `INSERT/DELETE`'d. For `INSERT/DELETE` operations, the `details` node will only contain a simple array of key-value-pairs - for the column-names and data `INSERT/DELETE`'d. For `UPDATE` operations, the `details` node will contain a set of arrays - in the form of `column-name-modified` + `from`, to `values` such that each `UPDATE` 'capture' will display the before and after values for each column modified during the `UPDATE`.
-
+Each audit-record consists of two elements: 
+- **key**. Used to IDENTIFY the exact row(s) being INSERT/UPDATE/DELETE'd within the audited table.
+- **detail**. Capture of the exact details that changed with the audited operation:
+    - For INSERT/DELETE operations, `detail` will include the entire row (or rows) - including a 'duplicate' capture of any Primary Key data defined (e.g., if you INSERT or DELETE rows against a `dbo.Users` table where `UserID` is the Primary Key, the `UserID` value will exist in BOTH the `key` and `detail` nodes - as it BELONGS in both entities).
+    - For UPDATE operations, `detail` will only capture columns changed for the row(s) modified. 
 
 #### SYNTAX
 
 **High-level / Root Elements:** 
 
+SINGLE ROW SCHEMA:
 ```json
 
 [{
@@ -99,11 +99,38 @@ At a high-level, each audit record consists of two elements/nodes:
 
 ```
 
+MULTI-ROW SCHEMA: 
+```json 
+[
+    {
+        "key":[{   
+            <key_array> }], 
+        "detail":[{ 
+            <detail_array>
+        }]
+    }, 
+    {
+        "key":[{   
+            <key_array> }], 
+        "detail":[{ 
+            <detail_array>
+        }]
+    },
+    {
+        "key":[{   
+            <key_array> }], 
+        "detail":[{ 
+            <detail_array>
+        }]
+    }
+]
 
-**`<key_array>` Elements:**  
-Will only ever contain a list of scalar entries/values. 
+```
 
-Fully specified (i.e., including root/parent node) examples: 
+**`<key_array>` Node:**  
+The `key` node only contains key-value-pairs (i.e., column-name + value) for each column used as a Primary Key (or surrogate PK) for the table being audited.
+
+**EXAMPLES**
 
 A.  Single-column key example.
 ```json
@@ -114,21 +141,22 @@ A.  Single-column key example.
 
 ```
 
-B.  Example from a table with a composite key (ParentGroupingID + ItemKey are the Primary Key columns in this table):
+B.  Composite Key (ParentGroupingID + ItemKey are the Primary Key columns in this table):
 ```json 
 
 "key": [{
     "ParentGroupingID": 187, 
     "ItemKey": "ZZQA8-997-23A2" 
 }]
+
 ```
 
+**`<detail_array>` Node:**  
+Contains either a simple list of key-value-pairs (column-name + value) for INSERT/DELETE operations, or an object showing column-names + the `from` (before) and `to` (after) values for changes captured during `UPDATE` operations.
 
-`<detail_array>` Elements:  
-Can contain an array of scalar elements (for `INSERT/DELETE` operations).  
-Can also contain an array of multi-node values - when storing data for `UPDATE` operations. 
+**EXAMPLES**   
 
-A. Sample entry for INSERT or DELETE details - scalar values only:
+A. Sample entry for an INSERT or DELETE:
 
 ```json
 
@@ -141,7 +169,7 @@ A. Sample entry for INSERT or DELETE details - scalar values only:
 
 ```
 
-B. UPDATE variant - each modified column contains 2 child-elements showing `from` and `to` elements (i.e., before and after values) from the change: 
+B. Sample entry for an UPDATE - where each modified column contains `from` and `to` elements to enable before and after tracking:  
 
 ```json
 
@@ -174,11 +202,11 @@ A. Example of an INSERT for a new User - Sheila Jones (NOTE that her UserID (328
     }], 
     
 	"detail": [{
-	    "UserID": 328,
-		"email_address":"sheila.jones@big-corp.corp",
-		"first_name":"Sheila",
-		"last_name": "Jones", 
-		... etc. 
+	    "UserID": 328,  
+	    "email_address":"sheila.jones@big-corp.corp",
+	    "first_name":"Sheila",
+	    "last_name": "Jones",
+	    "etc":"more info here... "
 	}]    
     
 }]
