@@ -19,9 +19,10 @@ Core Functionality Complete and JSON is schema-compliant.
 - `@TransformOutput` Parameter added to `dda.get_audit_data`. Defaults to `1` (transform output), but can, explicitly, be set to 0 - to allow users/devs/techs/etc. to troubleshoot and audit data 'internally' without having to worry about odd/goofy transforms that might 'obfuscate' details.
 - `dda.list_deployed_triggers` - Logic to list all deployed dynamic data triggers in-play within database.
 - `dda.update_trigger_definitions` - Script to force/update all existing (deployed) triggers within a given database to the latest version of the trigger definition defined on/against `dda.trigger_host` (usefull (currently) for bug fixes/tuning and so on - i.e., make changes to the 'template definition - then execute `dda.update_trigger_definitions @PrintOnly = 0;`).
-- Triggers (bletch) against translation tables to help enforce business rules relative to table names (i.e., <schema>.<table> vs 'just-table-name') and warn on non-matched translations (translations defined without corresponding tables/tables+column-names).
+- Triggers (bletch) against translation tables to help enforce business rules relative to table names (i.e., `<schema>.<table>` vs 'just-table-name') and warn on non-matched translations (translations defined without corresponding tables/tables+column-names).
 
-## [0.8] - 2021-01-23
+
+## [0.8] - 2021-01-23  
 
 ### Initial Check-in
 Initial check-in to a new/stand-alone repository. 
