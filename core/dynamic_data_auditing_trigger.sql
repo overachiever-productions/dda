@@ -38,7 +38,7 @@ AS
 	DECLARE @currentUser sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
 	DECLARE @auditTimeStamp datetime = GETDATE();  -- all audit info always stored at SERVER time. 
 	DECLARE @rowCount int = -1;
-	DECLARE @txID int = CAST(LEFT(CAST(CURRENT_TRANSACTION_ID() AS sysname), 9) AS int);
+	DECLARE @txID int = CAST(RIGHT(CAST(CURRENT_TRANSACTION_ID() AS sysname), 9) AS int);
 
 	-- Determine Operation Type: INSERT, UPDATE, or DELETE: 
 	DECLARE @operationType sysname; 
