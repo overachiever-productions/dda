@@ -1,3 +1,9 @@
+-- TODO/PICKUP/NEXT: I'm down around lines 450-ish ... where I've got a RETURN 0. 
+-- To that point, I've shredded multi-row captures AND translated them as needed. 
+-- then, i just need to 'redetect' them... and ... serialize them back down to a SINGLE 'row' of data. 
+-- MIGHT make sense to simply add a 'translated_collapsed_rows' column or something stupid/tame like that as an initial attempt?
+
+
 /*
 
 	EXAMPLE (lame) Signatures:
@@ -185,7 +191,8 @@ WHERE
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
 		[translated_change_key] nvarchar(MAX) NULL, 
-		[translated_change_detail] nvarchar(MAX) NULL
+		[translated_change_detail] nvarchar(MAX) NULL, 
+		[translated_multi_row] nvarchar(MAX) NULL
 	);
 
 	INSERT INTO [#raw_data] (
@@ -222,6 +229,8 @@ WHERE
 		[kvp_id] int IDENTITY(1,1) NOT NULL, 
 		[kvp_type] sysname NOT NULL, 
 		[row_number] int NOT NULL,
+		[json_row_id] int NOT NULL DEFAULT 0,  -- for 'multi-row' ... rows. 
+		-- TODO: hmm. how can i grab the column-order in multi-column key definitions - or, for that matter, 'column' order in the "detail" section when it's shredded?
 		[table] sysname NOT NULL, 
 		[column] sysname NOT NULL, 
 		[translated_column] sysname NULL, 
@@ -238,65 +247,142 @@ WHERE
 		[translated_update_value] nvarchar(MAX) NULL
 	);
 
+	INSERT INTO [#key_value_pairs] (
+		[kvp_type],
+		[table],
+		[row_number],
+		[column],
+		[value],
+		[value_type]
+	)
+	SELECT 
+		N'key' [kvp_type],
+		[x].[table], 
+		[x].[row_number],
+		[y].[Key] [column], 
+		[y].[Value] [value],
+		[y].[Type] [value_type]
+	FROM 
+		[#raw_data] x
+		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
+		CROSS APPLY OPENJSON(z.[Value], N'$') y
+	WHERE 
+		x.[row_count] = 1
+		AND y.[Key] IS NOT NULL 
+		AND y.[Value] IS NOT NULL;
+
+	INSERT INTO [#key_value_pairs] (
+		[kvp_type],
+		[table],
+		[row_number],
+		[column],
+		[value],
+		[value_type]
+	)
+	SELECT 
+		N'detail' [kvp_type],
+		[x].[table], 
+		[x].[row_number],
+		[y].[Key] [column], 
+		[y].[Value] [value],
+		[y].[Type] [value_type]
+	FROM 
+		[#raw_data] x 
+		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
+		CROSS APPLY OPENJSON(z.[Value], N'$') y
+	WHERE 
+		x.[row_count] = 1
+		AND y.[Key] IS NOT NULL
+		AND y.[Value] IS NOT NULL;
+
+	IF EXISTS(SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN
+		
+		-- PERF: 2x passes here, one for $.key and one for $.detail feels cheap/lame. 
+		--		should be able to consolidate that down to a single pass with some conditional logic for where to 'shove' the elements (i.e., what to assign for #key_value_pairs.kvp_type)
+
+		WITH [row_keys] AS ( 
+			SELECT 
+				[x].[table], 
+				[x].[row_number],
+				[r].[Key] [json_row_id], 
+				[r].[Value] [change_details]
+			FROM 
+				[#raw_data] x 
+				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
+			WHERE 
+				x.[row_count] > 1
+		)
+
+		INSERT INTO [#key_value_pairs] (
+			[kvp_type],
+			[table],
+			[row_number],
+			[json_row_id],
+			[column],
+			[value],
+			[value_type]
+		)
+		SELECT 
+			N'key' [kvp_type], 
+			[x].[table], 
+			[x].[row_number],
+			[x].[json_row_id], 
+			[y].[Key] [column], 
+			[y].[Value] [value],
+			[y].[Type] [value_type]
+		FROM 
+			[row_keys] x
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.key'), '$') z
+			CROSS APPLY OPENJSON(z.[Value], N'$') y;
+
+		-- ditto, for details:
+		WITH [row_details] AS ( 
+			SELECT 
+				[x].[table], 
+				[x].[row_number],
+				[r].[Key] [json_row_id], 
+				[r].[Value] [change_details]
+			FROM 
+				[#raw_data] x 
+				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
+			WHERE 
+				x.[row_count] > 1
+		)
+
+		INSERT INTO [#key_value_pairs] (
+			[kvp_type],
+			[table],
+			[row_number],
+			[json_row_id],
+			[column],
+			[value],
+			[value_type]
+		)
+		SELECT 
+			N'detail' [kvp_type], 
+			[x].[table], 
+			[x].[row_number],
+			[x].[json_row_id], 
+			[y].[Key] [column], 
+			[y].[Value] [value],
+			[y].[Type] [value_type]
+		FROM 
+			[row_details] x
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.detail'), '$') z
+			CROSS APPLY OPENJSON(z.[Value], N'$') y;
+	END;
+
 -- TODO: multi-row results ... 
 --		a. 2x existing KVP inserts will throw in a WHERE to EXCLUDE cols with > 1 result. 
 --		b. multi-col results will get thrown in as row_number.sub_row_number (or some such convention) as a distinct 2x set of passes (and only run those 2x passes IF #raw_data.row_count has a result with > 1. 
 --				AND if the table in question is in ... the list of translation (columns or values) tables.
 --		c. throw in a [is_multirow]? or some similar marker into #kvps? 
 --			either way, down in the re-serialize (translations) process... do a 'pass' for single-row results, and a distinct pass for multi-row results. 
---		d. may need to change the audit_trigger - so that it puts multi-row results into ... multiple 'rows' (so that I have a better 'handle' into the results?). 
----			that said... should be such that an ordinal could/would/should work? (i.e., just need to test that crap out).
 
 -- PERF: 
 --		in point b., above, I make a note of ONLY running 'shredding' ops for rows (with > 1 row-modified AND) where the table they're from is in the list of translation tables... 
 --			might make a lot of sense to do that for the other 2x initial shreds/transforms (keys, values) - i.e., predicate those with instructions to ONLY shred/transform for tables where
 --			we're going to have the POSSIBILITY of a match. that's a cleaner approach (less shredding) than current implementation: shred all, then DELETE rows from tables that could NOT be a match.
-
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
-		[row_number],
-		[column],
-		[value],
-		[value_type]
-	)
-	SELECT 
-		N'key',
-		x.[table], 
-		x.[row_number],
-		y.[Key] [column], 
-		y.[Value] [value],
-		y.[Type] [value_type]
-	FROM 
-		[#raw_data] x
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
-	WHERE 
-		y.[Key] IS NOT NULL 
-		AND y.[Value] IS NOT NULL;
-
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
-		[row_number],
-		[column],
-		[value],
-		[value_type]
-	)
-	SELECT 
-		N'detail',
-		x.[table], 
-		x.[row_number],
-		y.[Key] [column], 
-		y.[Value] [value],
-		y.[Type] [value_type]
-	FROM 
-		[#raw_data] x 
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
-	WHERE 
-		y.[Key] IS NOT NULl
-		AND y.[Value] IS NOT NULL;
 
 	UPDATE [#key_value_pairs] 
 	SET 
@@ -394,9 +480,10 @@ WHERE
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
 		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [id],
+			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
 			[kvp_type], 
 			[row_number], 
+			[json_row_id],
 			ISNULL([translated_column], [column]) [column], 
 			CASE 
 				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
@@ -413,11 +500,12 @@ WHERE
 	), 
 	[keys] AS (
 		SELECT 
-			[id],
+			[sort_id],
 			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number] ORDER BY [id]) [current_kvp],
+			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
+			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
 			[row_number],
+			[json_row_id],
 			[column],
 			[value],
 			[value_type]
@@ -426,8 +514,9 @@ WHERE
 	)
 
 	SELECT 
-		[id],
+		[sort_id],
 		[row_number],
+		[json_row_id],
 		[kvp_type],
 		[kvp_count],
 		[current_kvp],
@@ -441,9 +530,10 @@ WHERE
 
 	WITH core AS ( 
 		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [id],
+			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
 			[kvp_type], 
 			[row_number], 
+			[json_row_id],
 			[table], 
 			ISNULL([translated_column], [column]) [column], 
 			CASE 
@@ -462,11 +552,12 @@ WHERE
 	), 
 	[details] AS (
 		SELECT 
-			[id],
+			[sort_id],
 			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number] ORDER BY [id]) [current_kvp],
+			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
+			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
 			[row_number],
+			[json_row_id],
 			[column],
 			[value],
 			[value_type]
@@ -474,9 +565,11 @@ WHERE
 			core
 	)
 
+
 	INSERT INTO [#translated_kvps] (
-		[id],
+		[sort_id],
 		[row_number],
+		[json_row_id],
 		[kvp_type],
 		[kvp_count],
 		[current_kvp],
@@ -485,8 +578,9 @@ WHERE
 		[value_type]
 	)
 	SELECT 
-		[id],
+		[sort_id],
 		[row_number],
+		[json_row_id],
 		[kvp_type],
 		[kvp_count],
 		[current_kvp],
@@ -495,14 +589,125 @@ WHERE
 		[value_type]
 	FROM 
 		[details];
-
 		
+	-- collapse multi-row results back down to a single 'set'/row of results:
+	IF EXISTS (SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN 
+
+
+		WITH [flattened] AS ( 
+			SELECT 
+				x.[row_number], 
+				x.[json_row_id], 
+				x.[kvp_type],
+				x.[kvp_count], 
+				x.[current_kvp], 
+				x.[column], 
+				x.[value], 
+				x.[value_type], 
+				x.[sort_id]		-- not currently used, but will/should be
+			FROM 
+				[#translated_kvps] x
+				INNER JOIN [#raw_data] r ON [x].[row_number] = [r].[row_number]
+			WHERE 
+				r.[row_count] > 1
+		), 
+		[keys] AS ( 
+			SELECT 
+				*
+			FROM 
+				[flattened]
+			WHERE 
+				[flattened].[kvp_type] = N'key'
+
+		), 
+		[details] AS ( 
+			SELECT 
+				*
+			FROM 
+				[flattened]
+			WHERE 
+				[flattened].[kvp_type] = N'detail'
+		),
+		[collapsed] AS (
+			SELECT 
+				x.[row_number], 
+				f.[json_row_id], 
+				(
+					SELECT
+						STRING_AGG(
+							N'"' + [k].[column] + N'":' + 
+							CASE 
+								WHEN [k].[value_type] = 2 THEN [k].[value]
+								ELSE N'"' + [k].[value] + N'"'
+							END + 
+							CASE 
+								WHEN [k].[current_kvp] = [k].[kvp_count] THEN N''
+								ELSE N','
+							END
+						, '')
+					FROM 
+						[keys] [k]
+					WHERE 
+						[x].[row_number] = [k].[row_number] 
+						AND [f].[json_row_id] = [k].[json_row_id]
+				) [key_data], 
+				(
+					SELECT 
+						STRING_AGG(
+							N'"' + [d].[column] + N'":' + 
+							CASE 
+								WHEN [d].[value_type] IN (2,5) THEN [d].[value]
+								ELSE N'"' + [d].[value] + N'"'
+							END + 
+							CASE 
+								WHEN [d].[current_kvp] = [d].[kvp_count] THEN N''
+								ELSE N','
+							END
+						, '')
+					FROM 
+						[details] [d] 
+					WHERE 
+						[x].[row_number] = [d].[row_number] 
+						AND [f].[json_row_id] = [d].[json_row_id]
+				) [detail_data]
+			FROM 
+				[#raw_data] [x]
+				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
+			GROUP BY 
+				[x].[row_number], f.[json_row_id]
+		), 
+		[serialized] AS ( 
+			SELECT 
+				[x].[row_number], 
+				N'[' + (
+					SELECT 
+						STRING_AGG(N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}', ',') 
+						FROM [collapsed] [c] WHERE c.[row_number] = x.[row_number]
+				) + N']' [serialized]
+			FROM 
+				[#raw_data] [x] 
+			WHERE 
+				[x].[row_count] > 1
+		)
+
+		UPDATE [r] 
+		SET 
+			[r].[translated_multi_row] = [s].[serialized]
+		FROM 
+			[#raw_data] [r] 
+			INNER JOIN [serialized] [s] ON [r].[row_number] = [s].[row_number]	
+		WHERE 
+			[r].[row_count] > 1
+	END;
+
 	-- Serialize KVPs (ordered by row_number) down to JSON: 
 	WITH [row_numbers] AS (
 		SELECT 
 			[row_number] 
 		FROM 
 			[#raw_data]
+		WHERE 
+			[row_count] = 1
 		GROUP BY 
 			[row_number]
 	), 
@@ -525,7 +730,7 @@ WHERE
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
 				--ORDER BY 
-				--	[x2].[id]
+				--	[x2].[sort_id]
 			) [key_data]
 		FROM 
 			[row_numbers] x
@@ -551,7 +756,7 @@ WHERE
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
 				--ORDER BY 
-				--	[x2].[id]
+				--	[x2].[sort_id]
 			) [detail_data]
 		FROM 
 			[row_numbers] x
@@ -561,11 +766,12 @@ WHERE
 	SET 
 		[x].[translated_change_key] = k.[key_data], 
 		[x].[translated_change_detail] = d.[detail_data]
-
 	FROM 
 		[#raw_data] x 
 		INNER JOIN [keys] k ON [x].[row_number] = [k].[row_number]
-		INNER JOIN [details] d ON [x].[row_number] = [d].[row_number];
+		INNER JOIN [details] d ON [x].[row_number] = [d].[row_number]
+	WHERE 
+		x.row_count = 1;
 
 Final_Projection:
 	SELECT 
@@ -579,9 +785,13 @@ Final_Projection:
 		[row_count],
 		CASE 
 			WHEN [translated_change_key] IS NOT NULL THEN N'[{"key":[{' + [translated_change_key] + N'}],"detail":[{' + [translated_change_detail] + N'}]}]'
+			WHEN [translated_multi_row] IS NOT NULL THEN [translated_multi_row] -- this and translated_change_key won't ever BOTH be populated (only one OR the other).
 			ELSE [change_details]
 		END [change_details] 
-	FROM [#raw_data];
+	FROM 
+		[#raw_data]
+	ORDER BY 
+		[row_number];
 
 	RETURN 0;
 GO
