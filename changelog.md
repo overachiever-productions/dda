@@ -1,5 +1,18 @@
 # Change Log
 
+## [1.0] - xxx
+Fully Functional - Initial Release. 
+
+### Known Issues: 
+
+## Fixed:
+- Corrected bug with v0.9 Bug with `from` and `to` translations of non-string data-types (i.e., no longer wrapping all JSON values with 'extra' quote (`) characters).
+- INSERT/UPDATE/DELETE operations that impact > 1 row now correctly serialize audit/capture details down to (schema compliant) multi-row JSON. 
+- `dda.get_audit_data` now correctly handles/translates multi-row JSON audit entries (i.e., INSERT/UPDATE/DELETE operations that impact > 1 row can now be correctly output + translated).
+
+## Added
+- 
+
 ## [0.9] - 2021-01-23
 Core Functionality Complete and JSON is schema-compliant.
 
