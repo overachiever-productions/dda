@@ -30,31 +30,19 @@ AS
 	IF @PrintOnly = 1 BEGIN 
 		PRINT N'/* ------------------------------------------------------------------------------------------------------------------';
 		PRINT N'';
-		PRINT N'NOTE: ';
-		PRINT N'	The @PrintOnly Parameter for this stored procedure defaults to a value of 1 - which means';
-		PRINT N'		that this sproc will not, by DEFAULT, modify existing triggers. ';
-		PRINT N'		Instead, by default, this sproc will SHOW you what it WOULD do (i.e., ''print only'' IF it '; 
-		PRINT N'		were executed with @PrintOnly = 0.';
+		PRINT N'	NOTE: ';
+		PRINT N'		The @PrintOnly parameter for this stored procedure defaults to a value of 1.';
+		PRINT N'			Or, in other words, by DEFAULT, this procedure will NOT modify existing triggers.';
+		PRINT N'			INSTEAD, it displays which changes it WOULD make - if executed otherwise.';
 		PRINT N'';
-		PRINT N'	To execute changes (after you''ve reviewed them), re-execute with @PrintOnly = 0.';
-		PRINT N'		EXAMPLE: ';
-		PRINT N'			EXEC dda.update_trigger_definitions @PrintOnly = 0;'
-		PRINT N'';
-		PRINT N'---------------------------------------------------------------------------------------------------------------------';
-		PRINT N'*/'
-		PRINT N'';
-		PRINT N'';
-
-		PRINT N'/* ------------------------------------------------------------------------------------------------------------------';
-		PRINT N'';
-		PRINT N'-- NEW BODY/DEFINITION of dynamic trigger will be as follows: ';
-		PRINT N'';
-		PRINT N'';
-		PRINT N'ALTER [<trigger_name>] ON [<trigger_table>] ' + @body;
-		PRINT N'';
+		PRINT N'		To execute changes (after you''ve reviewed them), explicitly set @PrintOnly = 0. ';
+		PRINT N'			EXAMPLE: ';
+		PRINT N'				EXEC dda.update_trigger_definitions @PrintOnly = 0;'
 		PRINT N'';
 		PRINT N'---------------------------------------------------------------------------------------------------------------------';
 		PRINT N'*/'
+		PRINT N'';
+		PRINT N'';
 
 	END;
 
@@ -158,16 +146,15 @@ AS
 			PRINT N'WARNING: Disabled Trigger Detected.';
 		END;
 
+		SET @sql = @directive + @body;
+
 		IF @PrintOnly = 1 BEGIN
-			PRINT N'-- IF @PrintOnly were set to 0, the following ALTER would be executed:'
-			PRINT @sql + N'AS '
-			PRINT N'     .... <trigger_body_here>...';
+			PRINT N'-- IF @PrintONly were set to 0, the following change would have been executed: ';
+			PRINT @directive + N' AS ..... <updated_trigger_body_here>...';
 			PRINT N''
-			PRINT N'GO';
 		  END; 
 		ELSE BEGIN 
-			SET @sql = @directive + @body;
-
+		
 			BEGIN TRY
 				BEGIN TRAN;
 
