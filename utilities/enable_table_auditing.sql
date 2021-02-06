@@ -39,7 +39,7 @@ AS
 		FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] 
 		WHERE t.[parent_id] = @objectID AND p.[name] = N'DDATrigger' AND p.[value] = 'true'
 	) BEGIN
-		RAISERROR(N'Target Table (%s) already has a dynamic data auditing (DDA) trigger defined. Please review existing triggers on table.', 16, 1, @objectName);
+		RAISERROR(N'Target Table %s already has a dynamic data auditing (DDA) trigger defined. Please review existing triggers on table.', 16, 1, @objectName);
 		RETURN -20;
 	END;
 
