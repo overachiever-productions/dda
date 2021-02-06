@@ -89,14 +89,7 @@ AS
 	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
 	SELECT 
 		ROW_NUMBER() OVER (ORDER BY [timestamp]) [row_number],
-		[audit_id],
-		[timestamp],
-		[schema],
-		[table],
-		[user],
-		[operation],
-		[row_count],
-		[audit] [change_details]
+		[audit_id]
 	FROM 
 		[dda].[audits]
 	WHERE 
@@ -104,21 +97,50 @@ AS
 		{Users}
 		{Tables}
 ) 
-SELECT 
+SELECT @coreJSON = (SELECT 
 	[row_number],
 	(SELECT COUNT(*) FROM [total]) [total_rows],
-	[audit_id],
-	[timestamp],
-	[schema] + N''.'' + [table] [table],
-	[user],
-	[operation],
-	[row_count],
-	[change_details]
+	[audit_id]
 FROM 
 	total 
 WHERE 
-	[total].[row_number] >= @FromIndex AND [total].[row_number] <= @ToIndex;
+	[total].[row_number] >= @FromIndex AND [total].[row_number] <= @ToIndex
+FOR JSON PATH);
 ';
+
+--	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
+--	SELECT 
+--		ROW_NUMBER() OVER (ORDER BY [timestamp]) [row_number],
+--		[audit_id],
+--		[timestamp],
+--		[schema],
+--		[table],
+--		[user],
+--		[operation],
+--		[row_count],
+--		[audit] [change_details]
+--	FROM 
+--		[dda].[audits]
+--	WHERE 
+--		{TimeFilters}
+--		{Users}
+--		{Tables}
+--) 
+--SELECT 
+--	[row_number],
+--	(SELECT COUNT(*) FROM [total]) [total_rows],
+--	[audit_id],
+--	[timestamp],
+--	[schema] + N''.'' + [table] [table],
+--	[user],
+--	[operation],
+--	[row_count],
+--	[change_details]
+--FROM 
+--	total 
+--WHERE 
+--	[total].[row_number] >= @FromIndex AND [total].[row_number] <= @ToIndex;
+--';
 
 	DECLARE @timeFilters nvarchar(MAX) = N'';
 	DECLARE @users nvarchar(MAX) = N'';
@@ -177,8 +199,15 @@ WHERE
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
 	
-	DECLARE @matchedRows int;
+	DECLARE @coreJSON nvarchar(MAX);
+	EXEC sp_executesql 
+		@coreQuery, 
+		N'@FromIndex int, @ToIndex int, @coreJSON nvarchar(MAX) OUTPUT', 
+		@FromIndex = @FromIndex, 
+		@ToIndex = @ToIndex, 
+		@coreJSON = @coreJSON OUTPUT;
 
+	DECLARE @matchedRows int;
 	CREATE TABLE #raw_data ( 
 		[row_number] int NOT NULL,
 		[total_rows] int NOT NULL, 
@@ -188,6 +217,7 @@ WHERE
 		[translated_table] sysname NULL,
 		[user] sysname NOT NULL,
 		[operation_type] char(9) NOT NULL,
+		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
 		[translated_change_key] nvarchar(MAX) NULL, 
@@ -195,23 +225,36 @@ WHERE
 		[translated_multi_row] nvarchar(MAX) NULL
 	);
 
+	-- NOTE: INSERT + EXEC (dynamic-SQL with everything needed from dda.audits in a single 'gulp') would make more sense here. 
+	--		BUT, INSERT + EXEC causes dreaded "INSERT EXEC can't be nested..." error if/when UNIT tests are used to test this code. 
+	--			So, this 'hack' of grabbing JSON (dynamically), shredding it, and JOINing 'back' to dda.audits... exists below):
 	INSERT INTO [#raw_data] (
-		[row_number],
-		[total_rows],
-		[audit_id],
-		[timestamp],
-		[table],
-		[user],
-		[operation_type],
-		[row_count],
-		[change_details]
+		[x].[row_number],
+		[x].[total_rows],
+		[x].[audit_id],
+		[a].[timestamp],
+		[a].[table],
+		[a].[user],
+		[a].[operation_type],
+		[a].[transaction_id],
+		[a].[row_count],
+		[a].[change_details]
 	)
-	EXEC sp_executesql 
-		@coreQuery, 
-		N'@FromIndex int, @ToIndex int', 
-		@FromIndex = @FromIndex, 
-		@ToIndex = @ToIndex;
-	
+	SELECT 
+		[x].[row_number],
+		[x].[total_rows],
+		[x].[audit_id],
+		[a].[timestamp],
+		[a].[schema] + N'.' + [a].[table] [table],
+		[a].[user],
+		[a].[operation],
+		[a].[transaction_id],
+		[a].[row_count],
+		[a].[audit] [change_details]
+	FROM 
+		OPENJSON(@coreJSON) WITH ([row_number] int, [total_rows] int, [audit_id] int) [x]
+		INNER JOIN dda.[audits] [a] ON [x].[audit_id] = [a].[audit_id];
+
 	SELECT @matchedRows = @@ROWCOUNT;
 
 	-- short-circuit options for transforms:
