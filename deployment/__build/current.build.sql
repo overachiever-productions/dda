@@ -131,13 +131,16 @@ END;
 ------------------------------------------------------------------------------------------------------------------------------------------------------
 
 -----------------------------------
+--##INCLUDE: utilities\list_dynamic_triggers.sql
+
+-----------------------------------
 --##INCLUDE: utilities\enable_table_auditing.sql
 
 -----------------------------------
---##INCLUDE: utilities\update_trigger_definitions.sql
+--##INCLUDE: utilities\enable_database_auditing.sql
 
 -----------------------------------
---##INCLUDE: utilities\list_dynamic_triggers.sql
+--##INCLUDE: utilities\update_trigger_definitions.sql
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
