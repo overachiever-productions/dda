@@ -23,8 +23,7 @@ AS
 
 	-- {copyright}
 
+	SELECT 'Not implemented yet.' [status];
 
-
-
-
-	SELECT * FROM [dda].[audits]
+	RETURN 0;
+GO
