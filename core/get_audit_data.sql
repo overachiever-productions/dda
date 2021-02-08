@@ -108,40 +108,6 @@ WHERE
 FOR JSON PATH);
 ';
 
---	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
---	SELECT 
---		ROW_NUMBER() OVER (ORDER BY [timestamp]) [row_number],
---		[audit_id],
---		[timestamp],
---		[schema],
---		[table],
---		[user],
---		[operation],
---		[row_count],
---		[audit] [change_details]
---	FROM 
---		[dda].[audits]
---	WHERE 
---		{TimeFilters}
---		{Users}
---		{Tables}
---) 
---SELECT 
---	[row_number],
---	(SELECT COUNT(*) FROM [total]) [total_rows],
---	[audit_id],
---	[timestamp],
---	[schema] + N''.'' + [table] [table],
---	[user],
---	[operation],
---	[row_count],
---	[change_details]
---FROM 
---	total 
---WHERE 
---	[total].[row_number] >= @FromIndex AND [total].[row_number] <= @ToIndex;
---';
-
 	DECLARE @timeFilters nvarchar(MAX) = N'';
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
