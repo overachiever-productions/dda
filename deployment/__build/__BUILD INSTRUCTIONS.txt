@@ -28,30 +28,42 @@ BUILD DIRECTIVES HANDLED BY DDABuild(Prototype).exe:
 			NOTE: if the path defined does not exist or match a .sql file the Build Tool will throw an exception.
 
 	--##CONDITIONAL_SUPPORT(xxx) 
+		Allows OPTIONAL support (or not) of code/logic. (Unlike ##CONDITIONAL_VERSION() - which enables DIFFERENT versions).
 		where xxx is the condition to be satisfied 
-		and where this directive, when place above a sproc's definition (in an --##INCLUDE'd file) 
-			will cause the build file to: 
-				a) create a place-holder that says that the sproc isn't supported
-					(currently it says "not supported in 2008" but I need to tweak this so that the RAISERORR content is 
-						passed along in the form of this syntax:  --##CONDITIONAL_SUPPORT(< 10.5)[This is the OPTIONAL RaiseError message - otherwise there will be a default placeholder of "sorry, not supported".
+		AND, if the engine doesn't MEET said condition (version), then the guts of the sproc will 
+			end up being a "Sorry, S4 doesn't support this on version XYZ." result instead of body/logic. 
+			
+			To Implement: 
+				a. PUT the directive ABOVE the CREATE PROC/ETC signature. 
+					e.g., 
+						--##CONDITIONAL_SUPPORT(> 10.5)
 
-				b)? ... i got distracted? what? the 'docs' here are missing. 
-				that said: 
-					1... there's some info in the DDABuildPrototype that shows how this stuff is handled. 
-					2... there's an example of this functionality in dbo.generate_audit_signature;
-				 3. there's an example of CONDITIONAL_VERSION in dbo.list_synchronizing_databases
+						CREATE PROC dbo.etc... 
+
+
+				b. Create sproc/UDF/whatever with 'normal' signature and normal capabilities (i.e., for instances > condition). 
+				c. Build script will do the 'rest'
+					i.e., it'll see that conditional, split the sproc apart, and create a stub-in on lower-version
+					instances that throws an error. 
+					AND, it'll create an 'alter' that 'updates' the stub to full functionality on instances >= condition.
+
 
 	--##CONDITIONAL_VERSION(xxx) 
-		where xxx is the condition to be satisfied 
-			and where anything that FOLLOWS this directive will be an ALTER script - i.e., DEFINED as an ALTER SPROC/FUNC whatever... that modifies
-			the definition 'up' to a newer version or whatever. 
-				i.e., if/when run on a newer instances of SQL Server, the CONTENTS of the .sql file - when run 'normally' will... just
-					a) DROP
-					b) CREATE (dumber/older version)
-					c) ALTER... 
+		Allows DIFFERENT versions of the same code - depending upon server/instance version. 
 
-				the ONLY difference here is that the ALTER WOULD BREAK on older versions... (i.e., it'd fail syntax checks)
-					so... the 'guts' of that alter are GRABBED and then put into an @variable instead...
+			To Implement: 
+				a. create the down/lower-level version of the code as CREATE FUNCTION/SPROC... 
+					i.e., this is the function using the OLDER code. 
+				b. Add the CONDITIONAL_VERSION() header + an ALTER
+					e.g., 
+
+					--##CONDITIONAL_VERSION(>15.0)
+					ALTER PROC dda.xyz.... 
+
+
+				c. the build script will 'do the rest' (i.e., it'll grab the ALTER and turn it into dynamic SQL to be executed IF
+					the version is >= condition. 
+		
 
 	##{{dda_version}}
 		token, which will be replaced by Maj.Min.Id.BuildID whenever the build file is running and processing
