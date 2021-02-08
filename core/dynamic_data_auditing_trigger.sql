@@ -64,8 +64,8 @@ AS
 	END;
 
 	DECLARE @template nvarchar(MAX) = N'SELECT @json = (SELECT 
-		(SELECT {key_columns} FROM {key_from_and_where} FOR JSON PATH) [key], 
-		(SELECT {detail_columns} FROM {detail_from_and_where} FOR JSON PATH) [detail]
+		(SELECT {key_columns} FROM {key_from_and_where} FOR JSON PATH, INCLUDE_NULL_VALUES) [key], 
+		(SELECT {detail_columns} FROM {detail_from_and_where} FOR JSON PATH, INCLUDE_NULL_VALUES) [detail]
 	FROM 
 		{FROM_CLAUSE}
 	FOR JSON PATH
