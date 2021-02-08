@@ -430,7 +430,7 @@ FOR JSON PATH);
 	UPDATE [#key_value_pairs] 
 	SET 
 		[from_value] = JSON_VALUE([value], N'$.from'), 
-		[to_value] = JSON_VALUE([value], N'$.to')--,
+		[to_value] = JSON_VALUE([value], N'$.to')
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
