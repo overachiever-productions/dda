@@ -3,27 +3,23 @@
 		I N S T R U C T I O N S
 
 			INSTALL
-				1. SET. 
-				2. RUN. 
-				3. CONFIGURE. 
+				1. RUN. 
+				2. CONFIGURE. 
 			
 			
 			UPDATE:
-				1. SET. 
-				2. RUN. 
-				3. UPDATE. 
+				1. RUN. 
+				2. UPDATE. 
 
 
 
 			I N S T A L L
-				1. SET
+				1. RUN
 					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
 					- Use SECTION 0 if/as needed (you can comment it out or change it - whatever suits your needs). 
-
-				2. RUN
 					- Once you're connected, in your target database, execute this entire script (i.e., F5). 
 
-				3. CONFIGURE
+				2. CONFIGURE
 					- Determine which tables you'd like to EXPLICITLY track for auditing changes (i.e., dda only works against explicitly targeted tables).
 						NOTE: 
 							- ONLY tables with an explicit PK (constraint) can be audited. (Tables without a PK are 'spreadsheets', even if they live in SQL Server).
@@ -82,14 +78,12 @@
 
 
 			U P D A T E
-				1. SET
+				1. RUN
 					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
 					- Use SECTION 0 if/as needed (you can comment it out or change it - whatever suits your needs). 
-
-				2. RUN
 					- Once you're connected, in your target database, execute this entire script (i.e., F5). 
 
-				3. UPDATE
+				2. UPDATE
 					- the DDA setup/update script (executed in step 2) will determine if there are new changes (updated logic) for the dda triggers already deployed into your environment. 
 						- IF there are NO logic changes available for your deployed/existing triggers, you're done. 
 												
@@ -126,8 +120,10 @@
 USE [your_db_here];
 GO
 
-
-
+IF DB_NAME() <> 'your_db_here' BEGIN
+	-- Throw an error and TERMINATE the connection (to avoid execution in the WRONG database (master, etc.)
+	RAISERROR('Please make sure you''re in your target database - i.e., change directives in Section 0 of this script.', 21, 1) WITH LOG;
+END;
 
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -546,7 +542,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -581,7 +577,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -653,7 +649,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -722,7 +718,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -790,7 +786,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @tableName sysname, @schemaName sysname;
 	SELECT 
@@ -1049,7 +1045,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -1808,7 +1804,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -2588,7 +2584,7 @@ CREATE PROC dda.get_audit_row
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SELECT 'Not implemented yet.' [status];
 
@@ -2609,7 +2605,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SELECT 
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(OBJECT_NAME(o.[object_id])) FROM sys.objects o WHERE o.[object_id] = t.[parent_id]) [parent_table],
@@ -2649,7 +2645,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -2798,7 +2794,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @TriggerNamePattern = ISNULL(NULLIF(@TriggerNamePattern, N''), N'ddat_{0}');
@@ -3198,7 +3194,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v0.9.3527.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.0.3527.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -3408,8 +3404,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'0.9.3527.1';
-DECLARE @VersionDescription nvarchar(200) = N'Test Build - for dda_latest.sql docs';
+DECLARE @CurrentVersion varchar(20) = N'1.0.3527.2';
+DECLARE @VersionDescription nvarchar(200) = N'Initial v1.0 Release - Core Features Complete.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history] WHERE CAST(LEFT(version_number, 3) AS decimal(2,1)) >= 4)
