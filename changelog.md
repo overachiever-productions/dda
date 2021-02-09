@@ -1,5 +1,27 @@
 # Change Log
 
+## [1.0] - xxx
+Fully Functional - Initial Release. 
+
+### Known Issues: :zap:
+- Translation + JSON Column-Order. In SOME cases the presence of a translation (via `dda.translation_columns` or `dda.translation_values`) MAY result in scenarios where column orders (either in the `"key"` or `"detail"` section (or both)) MAY be changed/reversed. e.g., if captured JSON was `[{ "key": [{ "UserPreferenceID":185}], "detail": [{ "UpdatePreference": 12, "AlertingPreference": 7 }] }]` it IS possible that a translation on/against - say, `"AlertingPreference of 7 => 'email_and_push'"` could/would (in some cases) result in the `AlertingPreference` and `UpdatePreference` 'column order' within JSON to deviate and/or change from what was in the original 'capture'. 
+- Translation + JSON Data-Types. Similarly, ih the example above, the 'translation' from the 'magic number' value of `7` for an `AlertingPreference` to `email_and_push` (a text value - instead of a numeric value), can/frequently-will result in mal-formed JSON in the form of `...,"AlertingPreference":email_and_push` (vs what should, correctly, be rendered in JSON as `..., "AlertingPreference":"email_and_push"...`).
+- Translation + NULLs. Translation mappings for values to/from NULL (via UPDATEs) are currently being skipped or missed during translation. 
+
+> ### :label: **NOTE:** 
+> *All, above, known-issues are problems with translation/output only (i.e., capture and storage of JSON is working correctly, but 'search' or 'review' operations involving the 3x scenarios above can/will result in known problems.)*
+
+## Fixed:
+- Dynamic Data Triggers now correctly CAPTURE `NULL` values in INSERT, UPDATE, and DELETE operations. (Previously they were simply skipped/missing.)
+- `dda.get_audit_data` now works on SQL Server 2016 instances. Previously, it only worked on SQL Server 2017+ instances (because of reliance upon `STRING_AGG()` for concatenation). Deployment now pushes XML-concat version (2016 compatible) as default implementation, and runs an ALTER (update) to use (faster) `STRING_AGG()` on 2017+ instances.
+- INSERT/UPDATE/DELETE operations that impact > 1 row now correctly serialize audit/capture details down to (schema compliant) multi-row JSON. 
+- `dda.get_audit_data` now correctly handles/translates multi-row JSON audit entries (i.e., INSERT/UPDATE/DELETE operations that impact > 1 row can now be correctly output + translated).
+- Corrected bug with v0.9 Bug with `from` and `to` translations of non-string data-types (i.e., no longer wrapping all JSON values with 'extra' quote (`) characters).
+
+## Added
+- `dda.enable_database_auditing` - Admin/Utility sproc to enable auditing of entire database - minus/excluding any tables without PKs (either by explicit exclusion `@ExcludedTables` or by 'skipping' all tables without explicit PKs - `@ExcludeTablesWithoutPKs`). Note that `dda.enable_database_auditing` will provide detailed summary/output information about which tables were 'added' to auditing, which could NOT be added (explicit or 'skipped' exclusions), those that already HAVE auditing triggers (but that need to be updated), and any errors/exceptions encountered along the way. In short, `dda.enable_database_auditing` is now 'step 2' in deploying auditing capabilites - i.e., install/deploy scripts, then run this 'command'. 
+- `dda.get_engine_version` - Internal/helper routine to help with conditional builds/deployment (specifically `STRING_AGG()` update (ALTER) for 2017+ instances to allow faster execution for `dda.get_audit_data`).
+
 ## [0.9] - 2021-01-23
 Core Functionality Complete and JSON is schema-compliant.
 
@@ -19,9 +41,10 @@ Core Functionality Complete and JSON is schema-compliant.
 - `@TransformOutput` Parameter added to `dda.get_audit_data`. Defaults to `1` (transform output), but can, explicitly, be set to 0 - to allow users/devs/techs/etc. to troubleshoot and audit data 'internally' without having to worry about odd/goofy transforms that might 'obfuscate' details.
 - `dda.list_deployed_triggers` - Logic to list all deployed dynamic data triggers in-play within database.
 - `dda.update_trigger_definitions` - Script to force/update all existing (deployed) triggers within a given database to the latest version of the trigger definition defined on/against `dda.trigger_host` (usefull (currently) for bug fixes/tuning and so on - i.e., make changes to the 'template definition - then execute `dda.update_trigger_definitions @PrintOnly = 0;`).
-- Triggers (bletch) against translation tables to help enforce business rules relative to table names (i.e., <schema>.<table> vs 'just-table-name') and warn on non-matched translations (translations defined without corresponding tables/tables+column-names).
+- Triggers (bletch) against translation tables to help enforce business rules relative to table names (i.e., `<schema>.<table>` vs 'just-table-name') and warn on non-matched translations (translations defined without corresponding tables/tables+column-names).
 
-## [0.8] - 2021-01-23
+
+## [0.8] - 2021-01-23  
 
 ### Initial Check-in
 Initial check-in to a new/stand-alone repository. 
