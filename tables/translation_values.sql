@@ -5,12 +5,72 @@ IF OBJECT_ID('dda.translation_values') IS NULL BEGIN
 		[table_name] sysname NOT NULL, 
 		[column_name] sysname NOT NULL, 
 		[key_value] sysname NOT NULL, 
-		[translation_value] sysname NOT NULL, 
+		[translation_value] sysname NOT NULL,
+		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
 		[notes] nvarchar(MAX) NULL,
 		CONSTRAINT PK_translation_keys PRIMARY KEY NONCLUSTERED ([translation_key_id])
 	);
 
 	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values_by_identifiers ON dda.[translation_values] ([table_name], [column_name], [key_value]);
+
+END;
+
+-- v0.9 to v1.0 Upgrade: 
+IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.translation_values') AND [name] = N'translation_value_type') BEGIN 
+
+	CREATE TABLE dda.translation_values2 (
+		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
+		[table_name] sysname NOT NULL, 
+		[column_name] sysname NOT NULL, 
+		[key_value] sysname NOT NULL, 
+		[translation_value] sysname NOT NULL,
+		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
+		[notes] nvarchar(MAX) NULL,
+		CONSTRAINT PK_translation_keys2 PRIMARY KEY NONCLUSTERED ([translation_key_id])
+	);
+
+	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values2_by_identifiers ON dda.[translation_values2] ([table_name], [column_name], [key_value]);
+
+	BEGIN TRY
+		BEGIN TRAN; 
+		
+			SET IDENTITY_INSERT dda.[translation_values2] ON;
+
+			INSERT INTO [dda].[translation_values2] (
+				[translation_key_id],
+				[table_name],
+				[column_name],
+				[key_value],
+				[translation_value],
+				[translation_value_type],
+				[notes]
+			)
+			SELECT 
+				[translation_key_id],
+				[table_name],
+				[column_name],
+				[key_value],
+				[translation_value],
+				1 [translation_value_type], -- default to 1 (string)
+				[notes] 
+			FROM 
+				dda.[translation_values];
+
+			SET IDENTITY_INSERT dda.[translation_values2] OFF;
+
+			DROP TABLE dda.[translation_values]; 
+
+			EXEC sp_rename N'dda.translation_values2.CLIX_translation_values2_by_identifiers', N'CLIX_translation_values_by_identifiers', N'INDEX';
+
+			EXEC sp_rename N'dda.translation_values2', N'translation_values'; -- table will STAY in the dda schema
+			EXEC sp_rename N'dda.PK_translation_keys2', N'PK_translation_keys';
+
+		COMMIT;
+	END TRY
+	BEGIN CATCH
+		SELECT N'WARNING!!!!!' [Deployment Error], N'Failured attempt to add translation_value_type to dda.translation_values' [Context], ERROR_NUMBER() [Error_Number], ERROR_MESSAGE() [Error_Message];
+		ROLLBACK;
+	END CATCH;
 
 END;
 
