@@ -2,28 +2,130 @@
 --##NOTE: This is a build file only (i.e., it stores upgade/install directives + place-holders for code to drop into dda, etc.)
 /*
 
-	REFERENCE:
-		- License, documentation, and source code at: 
-			https://github.com/overachiever-productions/dda/
+		I N S T R U C T I O N S
+
+			INSTALL
+				1. RUN. 
+				2. CONFIGURE. 
+			
+			
+			UPDATE:
+				1. RUN. 
+				2. UPDATE. 
+
+
+
+			I N S T A L L
+				1. RUN
+					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
+					- Use SECTION 0 if/as needed (you can comment it out or change it - whatever suits your needs). 
+					- Once you're connected, in your target database, execute this entire script (i.e., F5). 
+
+				2. CONFIGURE
+					- Determine which tables you'd like to EXPLICITLY track for auditing changes (i.e., dda only works against explicitly targeted tables).
+						NOTE: 
+							- ONLY tables with an explicit PK (constraint) can be audited. (Tables without a PK are 'spreadsheets', even if they live in SQL Server).
+							- You can create temporary 'work-arounds' for tables without PKs by adding rows to dda.surrogate_keys. 
+							- Attempting to 'tag' a table for auditing without a PK will result in an error - i.e., dda logic will require surrogate keys or a PK. 
+
+
+					- If you ONLY want to audit a FEW tables, use dda.enable_table_auditing - called 1x per EACH table you wish to audit:
+
+								For example, if you have a [Users] table with an existing PK, you'd run the following: 
+
+											EXEC dda.[enable_table_auditing] 
+												@TargetSchema = N'dbo',   -- defaults to dbo if NOT specified (i.e., NOT needed for dbo.owned-tables).
+												@TargetTable = N'Users';
+
+
+								And, if you had an [Events] 'table' without an explicitly defined PK, you could define a SURROGATE key
+									as part of the setup process for enabling auditing against this table, like so: 
+
+											EXEC dda.[enable_table_auditing]  
+												@TargetTable = N'Events', 
+												@SurrogateKeys = N'EventCategory, EventID';  -- DDA will treat these two columns as IF they were an explicit PK (for row Identification).
+
+
+
+					- If you want to audit MOST/ALL tables, use dda.enable_database_auditing - called 1x for an entire database - WITH OPTIONS to exclude specific tables. 
+						
+								For example, assume you have 35 tables in your database - and that you wish to track/audit all but 3 of them: 
+
+												EXEC dda.[enable_database_auditing] 
+													@ExcludedTables = N'Calendar, DateDimensions, StaticFields';
+
+
+								And/or if some of your 35 tables (other than the 3 listed above) do NOT have PKs and you wish to 'skip' them for now (or forever): 
+
+
+												EXEC dda.[enable_database_auditing] 
+													@ExcludedTables = N'Calendar, DateDimensions, StaticFields', 
+													@ExcludeTablesWithoutPKs = 1;
+
+										Then, the @ExcludeTablesWithoutPKs parameter will let you skip all tables that CANNOT be audited without either adding a PK or surrogate-key defs. 
+											NOTE: if you skip/exclude tables via the @ExcludeTablesWithoutPKs parameter, a report of all skipped tables will be output at the end of execution.
+
+					- for BOTH dda.enable_table_auditing and dda.enable_database_auditing, you CAN specify the format/naming-structure for deployed triggers
+						by using the @TriggerNamePattern - which uses the {0} token as a place-holder for your specific table-name. 
+
+								For example:
+									- if I have 3 tables in my database: Widgets, Users, and Events
+									- and I specify
+											@TriggerNamePattern = N'auditing_trigger_for_{0}'
+
+									- then the following trigger names will be applied/created (respectively) for the tables listed above: 
+													auditing_trigger_for_Widgets
+													auditing_trigger_for_Users
+													auditing_trigger_for_Events
+
+
+			U P D A T E
+				1. RUN
+					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
+					- Use SECTION 0 if/as needed (you can comment it out or change it - whatever suits your needs). 
+					- Once you're connected, in your target database, execute this entire script (i.e., F5). 
+
+				2. UPDATE
+					- the DDA setup/update script (executed in step 2) will determine if there are new changes (updated logic) for the dda triggers already deployed into your environment. 
+						- IF there are NO logic changes available for your deployed/existing triggers, you're done. 
+												
+						- IF THERE ARE changes, you'll be prompted/alerted to run dda.update_trigger_definitions. 
+
+								BY DEFAULT, execution of this sproc will set @PrintOnly = 1 - meaning it will SHOW you what it WOULD do if executed (@PrintOnlyy = 0). 
+								This gives you a chance to visually review which triggers will be updated. 
+
+
+								Or in other words:
+										a. run the following to review changes: 
+
+													EXEC dda.[update_trigger_definitions]
+
+										b. run the following to IMPLEMENT trigger change/updates against all of your deployed triggers: 
+
+													EXEC dda.[update_trigger_definitions] @PrintOnly = 0;
+
+						
+
+		R E F E R E N C E:
+			- License, documentation, and source code at: 
+				https://github.com/overachiever-productions/dda/
 
 
 */
 
 
-
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-/*
-
-
-!!!! WARNING
-
-
 -- 0. Make sure to run the following commands in the database you wish to target for audits (i.e., not master or any other db you might currently be in).
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- */
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
 
-USE [your database here];
+USE [your_db_here];
 GO
+
+IF DB_NAME() <> 'your_db_here' BEGIN
+	-- Throw an error and TERMINATE the connection (to avoid execution in the WRONG database (master, etc.)
+	RAISERROR('Please make sure you''re in your target database - i.e., change directives in Section 0 of this script.', 21, 1) WITH LOG;
+END;
 
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
