@@ -398,9 +398,10 @@ FOR JSON PATH);
 
 	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
 -- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
-	DELETE FROM [#key_value_pairs] 
-	WHERE
-		[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
+-- DDA-39: Bug/Busted:
+	--DELETE FROM [#key_value_pairs] 
+	--WHERE
+	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
 
 	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
 	UPDATE x 
@@ -1157,9 +1158,10 @@ FOR JSON PATH);
 
 	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
 -- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
-	DELETE FROM [#key_value_pairs] 
-	WHERE
-		[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
+-- DDA-39: Bug/Busted:
+	--DELETE FROM [#key_value_pairs] 
+	--WHERE
+	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
 
 	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
 	UPDATE x 
