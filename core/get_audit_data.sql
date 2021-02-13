@@ -781,6 +781,7 @@ Final_Projection:
 		[timestamp],
 		[user],
 		ISNULL([translated_table], [table]) [table],
+		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
 		CASE 
@@ -1547,6 +1548,7 @@ Final_Projection:
 		[timestamp],
 		[user],
 		ISNULL([translated_table], [table]) [table],
+		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
 		CASE 
