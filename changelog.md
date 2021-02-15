@@ -4,11 +4,10 @@
 Bug-Fixes + Improvements to core functionality.
 
 ## Known Issues: :zap:
-- Translations/mappings can inadvertently bust/break JSON data-typing. For example, assume you have a `dbo.UserPreferencesTable` with an `NewItemAlerts` (preferences) column - containing 'magic numbers' or ints (where, say, `0 = no alert`, `1 = email-alerts-only`, `2 = push-alerts`, `3 = sms-alerts`, and so on). CAPTURE or auditing of changes to this column will use CORRECT JSON - i.e., 'numerical' JSON in the form of, say, `"NewItemAlerts":3`, but - translations can cause this 'typing' to break - when swapping out 'magic numbers' for text. For example, if you created an explicit mapping in dda.translation_values that mapped the value `3` to the literal text `SMS or Text` this CAN (but will not ALWAYS) 'bust' JSON outputs during translation such that you might see something like `"NewItemAlerts":SMS or Text` - which is incorrect (it should be `"NewItemAlerts":"SMS or Text`" instead - i.e., text should be "wrapped"). Note that v2.0 will provide support for 'foreign key' mappings (vs the one-off(ish) mappings in `dda.translation_values`) and will also, as a consequence fix/correct this known bug. 
+1. Translations/mappings can inadvertently bust/break JSON data-typing. For example, assume you have a `dbo.UserPreferencesTable` with an `NewItemAlerts` (preferences) column - containing 'magic numbers' or ints (where, say, `0 = no alert`, `1 = email-alerts-only`, `2 = push-alerts`, `3 = sms-alerts`, and so on). CAPTURE or auditing of changes to this column will use CORRECT JSON - i.e., 'numerical' JSON in the form of, say, `"NewItemAlerts":3`, but - translations can cause this 'typing' to break - when swapping out 'magic numbers' for text. For example, if you created an explicit mapping in dda.translation_values that mapped the value `3` to the literal text `SMS or Text` this CAN (but will not ALWAYS) 'bust' JSON outputs during translation such that you might see something like `"NewItemAlerts":SMS or Text` - which is incorrect (it should be `"NewItemAlerts":"SMS or Text`" instead - i.e., text should be "wrapped"). Note that v2.0 will provide support for 'foreign key' mappings (vs the one-off(ish) mappings in `dda.translation_values`) and will also, as a consequence fix/correct this known bug. 
 
 ## Added: 
 - `dda.get_audit_data` now includes a `transaction_id` column in output (to help spot 'linked' operations via TX IDs).
-
 
 ## Fixed
 **Translation Fixes:**
