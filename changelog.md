@@ -1,6 +1,23 @@
 # Change Log
 
-## [1.0] - xxx
+## [1.3] - 2021-02-15
+Bug-Fixes + Improvements to core functionality.
+
+## Known Issues: :zap:
+- 
+
+## Added: 
+- `dda.get_audit_data` now includes a `transaction_id` column in output (to help spot 'linked' operations via TX IDs).
+
+
+## Fixed
+- Major Bug with translation attempts to pre-optimize outputs (against non-translated outputs) removing ALL output/translation data in `dda.get_audit_data` corrected. 
+- `dda.version_history` now correctly distinguishes between INSTALL and UPDATE deployments. 
+- `dda.audits.operation` column was incorrectly set to `char(9)` vs `char(6)` - now corrected during INSTALL/UPDATEs.
+
+
+
+## [1.0] - 2021-02-09
 Fully Functional - Initial Release. 
 
 ### Known Issues: :zap:
@@ -18,7 +35,7 @@ Fully Functional - Initial Release.
 - `dda.get_audit_data` now correctly handles/translates multi-row JSON audit entries (i.e., INSERT/UPDATE/DELETE operations that impact > 1 row can now be correctly output + translated).
 - Corrected bug with v0.9 Bug with `from` and `to` translations of non-string data-types (i.e., no longer wrapping all JSON values with 'extra' quote (`) characters).
 
-## Added
+## Added:
 - `dda.enable_database_auditing` - Admin/Utility sproc to enable auditing of entire database - minus/excluding any tables without PKs (either by explicit exclusion `@ExcludedTables` or by 'skipping' all tables without explicit PKs - `@ExcludeTablesWithoutPKs`). Note that `dda.enable_database_auditing` will provide detailed summary/output information about which tables were 'added' to auditing, which could NOT be added (explicit or 'skipped' exclusions), those that already HAVE auditing triggers (but that need to be updated), and any errors/exceptions encountered along the way. In short, `dda.enable_database_auditing` is now 'step 2' in deploying auditing capabilites - i.e., install/deploy scripts, then run this 'command'. 
 - `dda.get_engine_version` - Internal/helper routine to help with conditional builds/deployment (specifically `STRING_AGG()` update (ALTER) for 2017+ instances to allow faster execution for `dda.get_audit_data`).
 
