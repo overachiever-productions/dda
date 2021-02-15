@@ -615,6 +615,8 @@ FOR JSON PATH);
 						WHERE 
 							[x].[row_number] = [k].[row_number] 
 							AND [f].[json_row_id] = [k].[json_row_id]
+						ORDER BY 
+							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') [key_data],
@@ -631,7 +633,9 @@ FOR JSON PATH);
 							[details] [d] 
 						WHERE 
 							[x].[row_number] = [d].[row_number] 
-							AND [f].[json_row_id] = [d].[json_row_id]							
+							AND [f].[json_row_id] = [d].[json_row_id]		
+						ORDER BY 
+							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') [detail_data]
@@ -651,6 +655,8 @@ FOR JSON PATH);
 							N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}'
 						FROM 
 							[collapsed] [c] WHERE [c].[row_number] = [x].[row_number]
+						ORDER BY 
+							[c].[json_row_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') + N']' [serialized]
@@ -696,6 +702,8 @@ FOR JSON PATH);
 						END 
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
+					ORDER BY 
+						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 					
 				)
@@ -719,6 +727,8 @@ FOR JSON PATH);
 						END
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
+					ORDER BY 
+						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 				)
 			, 1, 1, N''), N'') [detail_data]
@@ -1329,7 +1339,7 @@ FOR JSON PATH);
 								WHEN [k].[current_kvp] = [k].[kvp_count] THEN N''
 								ELSE N','
 							END
-						, '')
+						, '') WITHIN GROUP (ORDER BY [k].[json_row_id], [k].[current_kvp], [k].[sort_id])
 					FROM 
 						[keys] [k]
 					WHERE 
@@ -1348,7 +1358,7 @@ FOR JSON PATH);
 								WHEN [d].[current_kvp] = [d].[kvp_count] THEN N''
 								ELSE N','
 							END
-						, '')
+						, '') WITHIN GROUP (ORDER BY [d].[json_row_id], [d].[current_kvp], [d].[sort_id])
 					FROM 
 						[details] [d] 
 					WHERE 
@@ -1360,13 +1370,13 @@ FOR JSON PATH);
 				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
 			GROUP BY 
 				[x].[row_number], f.[json_row_id]
-		), 
+		),
 		[serialized] AS ( 
 			SELECT 
 				[x].[row_number], 
 				N'[' + (
 					SELECT 
-						STRING_AGG(N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}', ',') 
+						STRING_AGG(N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}', ',') WITHIN GROUP (ORDER BY [c].[json_row_id])
 						FROM [collapsed] [c] WHERE c.[row_number] = x.[row_number]
 				) + N']' [serialized]
 			FROM 
@@ -1411,11 +1421,9 @@ FOR JSON PATH);
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
 							ELSE N','
 						END
-					, '')
+					, '') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
-				--ORDER BY 
-				--	[x2].[sort_id]
 			) [key_data]
 		FROM 
 			[row_numbers] x
@@ -1436,12 +1444,10 @@ FOR JSON PATH);
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
 							ELSE N','
 						END
-					, '')
+					, '') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
 
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
-				--ORDER BY 
-				--	[x2].[sort_id]
 			) [detail_data]
 		FROM 
 			[row_numbers] x
