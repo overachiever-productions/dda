@@ -4,18 +4,21 @@
 Bug-Fixes + Improvements to core functionality.
 
 ## Known Issues: :zap:
-- 
+- Translations/mappings can inadvertently bust/break JSON data-typing. For example, assume you have a `dbo.UserPreferencesTable` with an `NewItemAlerts` (preferences) column - containing 'magic numbers' or ints (where, say, `0 = no alert`, `1 = email-alerts-only`, `2 = push-alerts`, `3 = sms-alerts`, and so on). CAPTURE or auditing of changes to this column will use CORRECT JSON - i.e., 'numerical' JSON in the form of, say, `"NewItemAlerts":3`, but - translations can cause this 'typing' to break - when swapping out 'magic numbers' for text. For example, if you created an explicit mapping in dda.translation_values that mapped the value `3` to the literal text `SMS or Text` this CAN (but will not ALWAYS) 'bust' JSON outputs during translation such that you might see something like `"NewItemAlerts":SMS or Text` - which is incorrect (it should be `"NewItemAlerts":"SMS or Text`" instead - i.e., text should be "wrapped"). Note that v2.0 will provide support for 'foreign key' mappings (vs the one-off(ish) mappings in `dda.translation_values`) and will also, as a consequence fix/correct this known bug. 
 
 ## Added: 
 - `dda.get_audit_data` now includes a `transaction_id` column in output (to help spot 'linked' operations via TX IDs).
 
 
 ## Fixed
-- Major Bug with translation attempts to pre-optimize outputs (against non-translated outputs) removing ALL output/translation data in `dda.get_audit_data` corrected. 
+**Translation Fixes:**
+- A Major Bug (unknown issue at time of v1.0 publication) with translation attempts to pre-optimize outputs (against non-translated outputs) removing ALL output/translation data in `dda.get_audit_data` corrected. 
+- Translation + NULLs. A known issue in v1.0 would result in `UPDATE`s involving `NULL` values in the `from`/`to` JSON to skip/bypass translations or explicit translation mappings. This has been corrected in v1.3.
+- Known-issue in version 1.0 where 'column order' within translated JSON outputs COULD shift or change order (e.g., if `INSERT`ed columns were `UserName`, `UserEmail`, and `UserPreferences` in audited/captured JSON, the existence of mappings/translations MIGHT cause translated JSON to output in `UserPreferences`, `UserName`, `UserEmail` (or other 'changed' orders)) - has been fixed in v1.3.
+
+**Other Fixes:**
 - `dda.version_history` now correctly distinguishes between INSTALL and UPDATE deployments. 
 - `dda.audits.operation` column was incorrectly set to `char(9)` vs `char(6)` - now corrected during INSTALL/UPDATEs.
-
-
 
 ## [1.0] - 2021-02-09
 Fully Functional - Initial Release. 
