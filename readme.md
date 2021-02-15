@@ -13,8 +13,8 @@ Dynamic Data Audits (DDA) main benefits:
 - **SQL Server 2016+ ONLY.** Relies upon NATIVE JSON support for data storage.
 - **Triggers.** Uses triggers (vs CDC). Triggers are a Bad Idea(TM) when used as a 'shortcut' for implementing business logic. But they're mostly excellent for auditing purposes - except for their NORMALLY brittle nature and challenges with data-storage - both of which are addressed by dda. 
 
-### Known Issues 
-- Data capture works perfectly. But there are 3x (minor) issues that can occur if/when TRANSLATIONs are defined for search/output. See the [changelog.md](/changelog.md) for more details. 
+### Known Issue
+- Data capture works perfectly. But there is 1 issue that can occur if/when TRANSLATIONs are defined for search/output. See the [changelog.md](/changelog.md) for more details. 
 
 
 ## Deployment 
