@@ -545,7 +545,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -580,7 +580,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -652,7 +652,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -721,7 +721,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -776,6 +776,85 @@ GO
 			(i.e., full or partial removal of 'duplicates'/non-changes is what we're after - i.e., if x and a were only columns in SET of UPDATE and there are no changes, 
 				maybe BAIL and don't record this? whereas if it was x OR a that had a change, just record the ONE that changed?
 
+
+	COMPOSITE KEYS:
+		If there's 1x row. it's easy: 
+			a. detect that there was a change to the keys (meta-data should make this easy enough and/or check columns_changed vs keys - i.e.,, i've already established both... )
+			b. again, if it's a single row - it's just a TOP (1) JOIN or something stupid (i.e., hard-coded SELECT/grab against old/new - the end). 
+
+		If there are > 1 rows modified
+			a. dayum. 
+			b. unless 
+				1. inserted and deleted both 100% get 'populated' in the same order 
+				AND
+				2. I can somehow ROW_NUMBER() them OUT of those tables in a 100% predictable order... 
+					then game over. seriously. 
+						
+						Assume a table with the following columns:
+								ID
+								SequenceNumber 
+
+						And values of: 
+								1, 1
+								1, 2
+								1, 3
+
+						And this UPDATE:
+							UPDATE myTable SET SequenceNumber = SequenceNumber + 1 WHERE ID = 1; 
+
+								that's 3x rows... changes
+									unless i KNOW that 'row 1' of deleted is the SAME as 'row 1' of inserted.. there's no way to glue this stuff together. 
+										period. i could try various hashes, various CROSS joins, but ... therey're not going to give me the kinds of results i need. 
+
+
+							So, the tests I need to determine how inserted/delete behave (and how ROW_NUMBER() OVER() work... ) 
+								would be: 
+									- ID + SequenceNumber and the UPDATE above - 
+									- similar, but one x of the above as a string/text
+									- ditto, but decimal
+									- ditto, but both strings
+									- ditto, both decimal
+
+									and so on... 
+
+							Finally, 
+								IF composite keys don't work - with multiple rows. 
+								then, the only 'fix'/work-around would be
+
+									a. add a new IDENTITY or GUID column called, say, row_id. 
+									b. doing ONE of the following: 
+											i. changing the table's PK from, say, TaskID, StepID to -> row_id. 
+													this ... positively sucks and wouldn't make sense in many environments
+													plus... it just sucks and ... it sucks. 
+
+											ii. LEAVING the existing, composite, PK 100% alone and as-is. 
+												marking row_id as a 'surrogate' key. 
+													this way, the table still 100% works as expected and auditing can/will happen based on this new 'key'. 
+
+													the RUB/concern with this work-around is: 
+														surrogate_keys, currently, are what we use if/when we can't find a DEFINITIVE key. 
+															i could flip that around or something, but that's a bad idea. 
+																Surrogate Keys <> CompositeKey-Link-Thingies. 
+																	Meaning, I need a second table: dda.composite_key_workarounds
+
+																	And, with such a key, behavior could be: 
+																		A. WARN users about composite keys during install/configuration "hey, this is a composite key, multi-row updates will suck/fail, yous should 1. add a NEW_ID() and 2. a mapping in such and such table"
+																		B. if/when the trigger detects that LEGIT PK rows are/were in the changed columns... 
+																				if it's just 1x row... done and done (assuming it's easier to just grab before/after without looking up the 'work-around-composite-key'. 
+																					otherwise, if it's > 1 row or using the work-around-composite_key is EASIER... just 'bind' on those values instead. 
+
+															And, the take-away here is: 
+																many environments might already have an IDENTITY or ROW_GUID_COL() type row in place anyhow - i.e., on their tables AND a composite key. 
+																	erven if they don't, they MIGHT??? have some other column that IS a 'glue-y' enough (distinct enough per composite-key-pairs) that it COULD work. 
+																		if not, adding this column, while it sucks, would be a small price to pay. 
+																				adding this column though would, of course, be a size of data operation. 
+																					BUT
+																						I could help them implement that with docs and guidance on: 
+																							1. ALTER yourTable ADD row_guid_magic uniqueidentifier NULL. 
+																							2. NIBBLING UPDATEs. 
+																							3. ALTER ... NON NULL + DEFAULT - to decrease down-time and so on. 
+
+
 */
 DROP TRIGGER IF EXISTS [dda].[dynamic_data_auditing_trigger_template];
 GO
@@ -789,7 +868,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @tableName sysname, @schemaName sysname;
 	SELECT 
@@ -799,7 +878,7 @@ AS
 		sys.objects 
 	WHERE 
 		[object_id] = (SELECT [parent_object_id] FROM sys.[objects] WHERE [object_id] = @@PROCID);
-	
+
 	DECLARE @auditedTable sysname = QUOTENAME(@schemaName) + N'.' + QUOTENAME(@tableName);
 	DECLARE @currentUser sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
 	DECLARE @auditTimeStamp datetime = GETDATE();  -- all audit info always stored at SERVER time. 
@@ -904,11 +983,15 @@ AS
 
 		DECLARE @changeMap varbinary(1024) = (SELECT COLUMNS_UPDATED());
 		DECLARE @joinKeys nvarchar(MAX) = N'';
+		DECLARE @rawKeys nvarchar(MAX) = N''
+		DECLARE @rawColumnNames nvarchar(MAX) = N'';
+		DECLARE @keyUpdate bit = 0;
 		
 		SELECT
 			@keys = @keys +  N'[i2].' + QUOTENAME([result]) + N',', 
-			@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N' AND '
-		FROM 
+			@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N' AND ', 
+			@rawKeys = @rawKeys + [result] + N','
+ 		FROM 
 			dda.[split_string](@pkColumns, N',', 1) 
 		ORDER BY 
 			row_id;
@@ -916,7 +999,8 @@ AS
 		SET @keys = LEFT(@keys, LEN(@keys) - 1);
 
 		SELECT
-			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.from], ' + @crlf + @tab + @tab + @tab + N'[i2].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.to], '
+			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.from], ' + @crlf + @tab + @tab + @tab + N'[i2].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.to], ',
+			@rawColumnNames = @rawColumnNames + [column_name] + N','
 		FROM 
 			dda.[translate_modified_columns](@auditedTable, @changeMap)
 		WHERE 
@@ -926,8 +1010,10 @@ AS
 
 		SELECT 
 			@keys = LEFT(@keys, LEN(@keys)), 
+			@rawKeys = LEFT(@rawKeys, LEN(@rawKeys) - 1),
 			@joinKeys = LEFT(@joinKeys, LEN(@joinKeys) - 4), 
-			@columnNames = LEFT(@columnNames, LEN(@columnNames) - 1);
+			@columnNames = LEFT(@columnNames, LEN(@columnNames) - 1), 
+			@rawColumnNames = LEFT(@rawColumnNames, LEN(@rawColumnNames) - 1);
 
 		DECLARE @from nvarchar(MAX) = N'#temp_deleted d ' + @crlf + @tab + @tab + N'INNER JOIN #temp_inserted i ON ';
 
@@ -939,6 +1025,32 @@ AS
 		ORDER BY 
 			row_id;
 
+		IF EXISTS( 
+			SELECT NULL FROM dda.[split_string](@rawColumnNames, N',', 1)
+			WHERE [result] IN (SELECT [result] FROM dda.[split_string](@rawKeys, N',', 1))
+		) SET @keyUpdate = 1;
+
+		IF @keyUpdate = 1 BEGIN 
+
+			IF @rowCount = 1 BEGIN
+				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
+				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
+			  END;
+			ELSE BEGIN 
+				-- vNEXT: 
+				-- 1. Check for a secondary key/mapping in dda.secondary_keys. 
+				-- 2. If that exists, SET @joinKeys = N'[i2].[key_name_1] = [d].[key_name_1] AND ... etc';
+				--		done. 
+
+				-- 3. If the above mappings do NOT exit: 
+				--	@json/output will need to look like: [{ "keys": [{"Hmmm. not even sure this works"}], "detail":{[ "probably nothing here too?" }], "dump": {[ throw "deleted" and "inserted" into here as SELECT * from each" "}] }]
+				--		so, yeah, actually... if/when there's NOT a secondary key and MULTIPLE ROWS were updated, I THINK the reality is... 
+				--		i don't/won't have a 3rd node to add. I think there will ONLY be "deleted" and "inserted" results - the end? 
+
+				RAISERROR(N'Multi-Row UPDATEs that change Primary Key Values are not YET supported. This change was allowed (vs ROLLED back/terminated), but NOT captured correctly.', 16, 1);
+			END;
+		END;
+
 		SET @sql  = REPLACE(@sql, N'{FROM_CLAUSE}', N'[#temp_inserted] [i]');
 		
 		SET @sql = REPLACE(@sql, N'{key_columns}', @keys);
@@ -946,7 +1058,10 @@ AS
 
 		SET @sql = REPLACE(@sql, N'{detail_columns}', @crlf + @tab + @tab + @tab + @columnNames + @crlf + @tab + @tab);
 		SET @sql = REPLACE(@sql, N'{detail_from_and_where}', @crlf + @tab + @tab + @tab + N'[#temp_inserted] [i2]' + @crlf + @tab + @tab + @tab + N'INNER JOIN [#temp_deleted] [d] ON ' + @joinKeys + @crlf + @tab + @tab + N' WHERE [i].[dda_trigger_id] = [i2].[dda_trigger_id]');
+
 	END;
+
+PRINT @sql;
 
 	DECLARE @json nvarchar(MAX); 
 	EXEC sp_executesql 
@@ -999,37 +1114,21 @@ GO
 
 -----------------------------------
 /*
-
-	EXAMPLE (lame) Signatures:
+	EXAMPLE Signatures:
 
 			EXEC dda.[get_audit_data]
 				@StartTime = '2021-01-01 18:55:05',
 				@EndTime = '2021-01-30 18:55:05',
-				--@TargetUsers = N'',
-				--@TargetTables = N'',
 				@TransformOutput = 1,
 				@FromIndex = 1, 
 				@ToIndex = 20;
-				--@FromIndex = 4,
-				--@ToIndex = 6
 
 			EXEC dda.[get_audit_data]
 				@TargetUsers = N'sa, bilbo',
 				@TargetTables = N'SortTable,Errors',
-				@FromIndex = 1,
 				@TransformOutput = 1,
-				@ToIndex = 10;
-
-
-
-	TODO: 
-		move these (comments) OUT of the sproc body and into docs:
-			-- Biz Rules: 
-			-- @StartTime can be specified without @EndTime (set @EndTime = GETDATE()). 
-			-- @EndTime can NOT be specified without @StartTime (we could set @StartTime = MIN(audit_date), but that's just goofy semantics). 
-			-- We CAN query without @StartTime/@EndTime IF we have either @TargetUser or @TargetTable (or both). 
-			-- @TargetTable or @TargetUser can be queried WITHOUT times. 
-			-- In short: there ALWAYS has to be at LEAST 1x WHERE clause/predicate - but more are always welcome.
+				@FromIndex = 20,
+				@ToIndex = 40;
 
 */
 
@@ -1048,7 +1147,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -1186,9 +1285,6 @@ FOR JSON PATH);
 		[translated_multi_row] nvarchar(MAX) NULL
 	);
 
-	-- NOTE: INSERT + EXEC (dynamic-SQL with everything needed from dda.audits in a single 'gulp') would make more sense here. 
-	--		BUT, INSERT + EXEC causes dreaded "INSERT EXEC can't be nested..." error if/when UNIT tests are used to test this code. 
-	--			So, this 'hack' of grabbing JSON (dynamically), shredding it, and JOINing 'back' to dda.audits... exists below):
 	INSERT INTO [#raw_data] (
 		[x].[row_number],
 		[x].[total_rows],
@@ -1234,11 +1330,10 @@ FOR JSON PATH);
 		[kvp_type] sysname NOT NULL, 
 		[row_number] int NOT NULL,
 		[json_row_id] int NOT NULL DEFAULT 0,  -- for 'multi-row' ... rows. 
-		-- TODO: hmm. how can i grab the column-order in multi-column key definitions - or, for that matter, 'column' order in the "detail" section when it's shredded?
 		[table] sysname NOT NULL, 
 		[column] sysname NOT NULL, 
 		[translated_column] sysname NULL, 
-		[value] nvarchar(MAX) NULL, -- TODO: should I allow nulls here? Or, more importantly: how to handle NULLs here? they may be <NULL> or something 'odd' from JSON (i.e., type 0).
+		[value] nvarchar(MAX) NULL, 
 		[value_type] int NOT  NULL,
 		[translated_value] sysname NULL, 
 		[translated_value_type] int NULL,
@@ -1300,9 +1395,6 @@ FOR JSON PATH);
 		AND y.[Value] IS NOT NULL;
 
 	IF EXISTS(SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN
-		
-		-- PERF: 2x passes here, one for $.key and one for $.detail feels cheap/lame. 
-		--		should be able to consolidate that down to a single pass with some conditional logic for where to 'shove' the elements (i.e., what to assign for #key_value_pairs.kvp_type)
 
 		WITH [row_keys] AS ( 
 			SELECT 
@@ -1376,27 +1468,14 @@ FOR JSON PATH);
 			CROSS APPLY OPENJSON(z.[Value], N'$') y;
 	END;
 
--- TODO: multi-row results ... 
---		a. 2x existing KVP inserts will throw in a WHERE to EXCLUDE cols with > 1 result. 
---		b. multi-col results will get thrown in as row_number.sub_row_number (or some such convention) as a distinct 2x set of passes (and only run those 2x passes IF #raw_data.row_count has a result with > 1. 
---				AND if the table in question is in ... the list of translation (columns or values) tables.
---		c. throw in a [is_multirow]? or some similar marker into #kvps? 
---			either way, down in the re-serialize (translations) process... do a 'pass' for single-row results, and a distinct pass for multi-row results. 
-
--- PERF: 
---		in point b., above, I make a note of ONLY running 'shredding' ops for rows (with > 1 row-modified AND) where the table they're from is in the list of translation tables... 
---			might make a lot of sense to do that for the other 2x initial shreds/transforms (keys, values) - i.e., predicate those with instructions to ONLY shred/transform for tables where
---			we're going to have the POSSIBILITY of a match. that's a cleaner approach (less shredding) than current implementation: shred all, then DELETE rows from tables that could NOT be a match.
-
 	UPDATE [#key_value_pairs] 
 	SET 
-		[from_value] = JSON_VALUE([value], N'$.from'), 
-		[to_value] = JSON_VALUE([value], N'$.to')
+		[from_value] = ISNULL(JSON_VALUE([value], N'$.from'), N'null'), 
+		[to_value] = ISNULL(JSON_VALUE([value], N'$.to'), N'null')
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
 	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
--- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
 -- DDA-39: Bug/Busted:
 	--DELETE FROM [#key_value_pairs] 
 	--WHERE
@@ -1650,13 +1729,15 @@ FOR JSON PATH);
 						WHERE 
 							[x].[row_number] = [k].[row_number] 
 							AND [f].[json_row_id] = [k].[json_row_id]
+						ORDER BY 
+							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') [key_data],
 				COALESCE(STUFF(
 					(
 						SELECT
-							N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
+							N',' + 
 							N'"' + [d].[column] + N'":' + 
 							CASE 
 								WHEN [d].[value_type] IN (2,5) THEN [d].[value]
@@ -1666,7 +1747,9 @@ FOR JSON PATH);
 							[details] [d] 
 						WHERE 
 							[x].[row_number] = [d].[row_number] 
-							AND [f].[json_row_id] = [d].[json_row_id]							
+							AND [f].[json_row_id] = [d].[json_row_id]		
+						ORDER BY 
+							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') [detail_data]
@@ -1686,6 +1769,8 @@ FOR JSON PATH);
 							N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}'
 						FROM 
 							[collapsed] [c] WHERE [c].[row_number] = [x].[row_number]
+						ORDER BY 
+							[c].[json_row_id]
 						FOR XML PATH('')
 					)
 				, 1, 1, N''), N'') + N']' [serialized]
@@ -1723,7 +1808,7 @@ FOR JSON PATH);
 			COALESCE(STUFF(
 				(
 					SELECT 
-						N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
+						N',' + 
 						N'"' + [x2].[column] + N'":' +
 						CASE 
 							WHEN [x2].[value_type] = 2 THEN [x2].[value] 
@@ -1731,6 +1816,8 @@ FOR JSON PATH);
 						END 
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
+					ORDER BY 
+						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 					
 				)
@@ -1746,7 +1833,7 @@ FOR JSON PATH);
 			COALESCE(STUFF(
 				(
 					SELECT 
-						N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
+						N',' + 
 						N'"' + [x2].[column] + N'":' +
 						CASE 
 							WHEN [x2].[value_type] IN (2, 5) THEN [x2].[value]   -- if it's a number or json/etc... just use the RAW value
@@ -1754,6 +1841,8 @@ FOR JSON PATH);
 						END
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
+					ORDER BY 
+						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 				)
 			, 1, 1, N''), N'') [detail_data]
@@ -1780,6 +1869,7 @@ Final_Projection:
 		[timestamp],
 		[user],
 		ISNULL([translated_table], [table]) [table],
+		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
 		CASE 
@@ -1808,7 +1898,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -1994,11 +2084,10 @@ FOR JSON PATH);
 		[kvp_type] sysname NOT NULL, 
 		[row_number] int NOT NULL,
 		[json_row_id] int NOT NULL DEFAULT 0,  -- for ''multi-row'' ... rows. 
-		-- TODO: hmm. how can i grab the column-order in multi-column key definitions - or, for that matter, ''column'' order in the "detail" section when it''s shredded?
 		[table] sysname NOT NULL, 
 		[column] sysname NOT NULL, 
 		[translated_column] sysname NULL, 
-		[value] nvarchar(MAX) NULL, -- TODO: should I allow nulls here? Or, more importantly: how to handle NULLs here? they may be <NULL> or something ''odd'' from JSON (i.e., type 0).
+		[value] nvarchar(MAX) NULL, 
 		[value_type] int NOT  NULL,
 		[translated_value] sysname NULL, 
 		[translated_value_type] int NULL,
@@ -2060,9 +2149,6 @@ FOR JSON PATH);
 		AND y.[Value] IS NOT NULL;
 
 	IF EXISTS(SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN
-		
-		-- PERF: 2x passes here, one for $.key and one for $.detail feels cheap/lame. 
-		--		should be able to consolidate that down to a single pass with some conditional logic for where to ''shove'' the elements (i.e., what to assign for #key_value_pairs.kvp_type)
 
 		WITH [row_keys] AS ( 
 			SELECT 
@@ -2136,22 +2222,10 @@ FOR JSON PATH);
 			CROSS APPLY OPENJSON(z.[Value], N''$'') y;
 	END;
 
--- TODO: multi-row results ... 
---		a. 2x existing KVP inserts will throw in a WHERE to EXCLUDE cols with > 1 result. 
---		b. multi-col results will get thrown in as row_number.sub_row_number (or some such convention) as a distinct 2x set of passes (and only run those 2x passes IF #raw_data.row_count has a result with > 1. 
---				AND if the table in question is in ... the list of translation (columns or values) tables.
---		c. throw in a [is_multirow]? or some similar marker into #kvps? 
---			either way, down in the re-serialize (translations) process... do a ''pass'' for single-row results, and a distinct pass for multi-row results. 
-
--- PERF: 
---		in point b., above, I make a note of ONLY running ''shredding'' ops for rows (with > 1 row-modified AND) where the table they''re from is in the list of translation tables... 
---			might make a lot of sense to do that for the other 2x initial shreds/transforms (keys, values) - i.e., predicate those with instructions to ONLY shred/transform for tables where
---			we''re going to have the POSSIBILITY of a match. that''s a cleaner approach (less shredding) than current implementation: shred all, then DELETE rows from tables that could NOT be a match.
-
 	UPDATE [#key_value_pairs] 
 	SET 
-		[from_value] = JSON_VALUE([value], N''$.from''), 
-		[to_value] = JSON_VALUE([value], N''$.to'')
+		[from_value] = ISNULL(JSON_VALUE([value], N''$.from''), N''null''), 
+		[to_value] = ISNULL(JSON_VALUE([value], N''$.to''), N''null'')
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE ''%from":%"to":%'';
 
@@ -2162,7 +2236,7 @@ FOR JSON PATH);
 	--WHERE
 	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
 
-	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
+	-- Stage Translations (start with columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
@@ -2212,35 +2286,6 @@ FOR JSON PATH);
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
-
--- PERF / TODO:
-	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
--- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
--- TODO: test this against a ''wide'' table - I''ve only been testing narrow tables to this point... 
--- ACTUALLY, these aren''t quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N''key''
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N''key''
---		);
----- PERF: also, if I don''t ''pre-exclude'' these... then 2x passes here is crappy.
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N''detail''
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N''detail''
---		);
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
@@ -2329,8 +2374,7 @@ FOR JSON PATH);
 		FROM 
 			core
 	)
-
-
+	
 	INSERT INTO [#translated_kvps] (
 		[sort_id],
 		[row_number],
@@ -2409,7 +2453,7 @@ FOR JSON PATH);
 								WHEN [k].[current_kvp] = [k].[kvp_count] THEN N''''
 								ELSE N'',''
 							END
-						, '''')
+						, '''') WITHIN GROUP (ORDER BY [k].[json_row_id], [k].[current_kvp], [k].[sort_id])
 					FROM 
 						[keys] [k]
 					WHERE 
@@ -2428,7 +2472,7 @@ FOR JSON PATH);
 								WHEN [d].[current_kvp] = [d].[kvp_count] THEN N''''
 								ELSE N'',''
 							END
-						, '''')
+						, '''') WITHIN GROUP (ORDER BY [d].[json_row_id], [d].[current_kvp], [d].[sort_id])
 					FROM 
 						[details] [d] 
 					WHERE 
@@ -2440,13 +2484,13 @@ FOR JSON PATH);
 				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
 			GROUP BY 
 				[x].[row_number], f.[json_row_id]
-		), 
+		),
 		[serialized] AS ( 
 			SELECT 
 				[x].[row_number], 
 				N''['' + (
 					SELECT 
-						STRING_AGG(N''{"key": [{'' + [c].[key_data] + N''}],"detail":[{'' + [c].[detail_data] + N''}]}'', '','') 
+						STRING_AGG(N''{"key": [{'' + [c].[key_data] + N''}],"detail":[{'' + [c].[detail_data] + N''}]}'', '','') WITHIN GROUP (ORDER BY [c].[json_row_id])
 						FROM [collapsed] [c] WHERE c.[row_number] = x.[row_number]
 				) + N'']'' [serialized]
 			FROM 
@@ -2491,11 +2535,9 @@ FOR JSON PATH);
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''''
 							ELSE N'',''
 						END
-					, '''')
+					, '''') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N''key''
-				--ORDER BY 
-				--	[x2].[sort_id]
 			) [key_data]
 		FROM 
 			[row_numbers] x
@@ -2516,12 +2558,10 @@ FOR JSON PATH);
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''''
 							ELSE N'',''
 						END
-					, '''')
+					, '''') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
 
 				FROM 
 					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N''detail''
-				--ORDER BY 
-				--	[x2].[sort_id]
 			) [detail_data]
 		FROM 
 			[row_numbers] x
@@ -2546,6 +2586,7 @@ Final_Projection:
 		[timestamp],
 		[user],
 		ISNULL([translated_table], [table]) [table],
+		CONCAT(DATEPART(YEAR, [timestamp]), N''-'', RIGHT(N''000'' + DATENAME(DAYOFYEAR, [timestamp]), 3), N''-'', RIGHT(N''000000000'' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
 		CASE 
@@ -2589,7 +2630,7 @@ CREATE PROC dda.get_audit_row
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SELECT 'Not implemented yet.' [status];
 
@@ -2610,7 +2651,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SELECT 
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(OBJECT_NAME(o.[object_id])) FROM sys.objects o WHERE o.[object_id] = t.[parent_id]) [parent_table],
@@ -2650,7 +2691,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -2799,7 +2840,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @TriggerNamePattern = ISNULL(NULLIF(@TriggerNamePattern, N''), N'ddat_{0}');
@@ -3199,7 +3240,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v1.0.3531.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v1.3.3534.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -3409,8 +3450,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'1.0.3531.1';
-DECLARE @VersionDescription nvarchar(200) = N'Test to verify UPDATE vs INSTALL in dda.version_history.';
+DECLARE @CurrentVersion varchar(20) = N'1.3.3534.1';
+DECLARE @VersionDescription nvarchar(200) = N'Bug-Fixes + Improvements to core functionality.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
@@ -3428,3 +3469,11 @@ GO
 -----------------------------------
 SELECT * FROM dda.version_history;
 GO
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- 6. Notify of need to run dda.update_trigger_definitions if/as needed:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true') BEGIN 
+	SELECT N'Deployed DDA Triggers Detected' [scan_outcome], N'Please execute dda.update_trigger_definitions.' [recommendation], N'NOTE: Set @PrintOnly = 0 on dda.update_trigger_definitions to MAKE changes. By default, it only shows WHICH changes it WOULD make.' [notes];
+
+END;
