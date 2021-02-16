@@ -254,7 +254,7 @@ DECLARE @CurrentVersion varchar(20) = N'##{{dda_version}}';
 DECLARE @VersionDescription nvarchar(200) = N'##{{dda_version_summary}}';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
-IF EXISTS (SELECT NULL FROM dda.[version_history] WHERE CAST(LEFT(version_number, 3) AS decimal(2,1)) >= 4)
+IF EXISTS (SELECT NULL FROM dda.[version_history])
 	SET @InstallType = N'Update. ';
 
 SET @VersionDescription = @InstallType + @VersionDescription;
