@@ -18,5 +18,8 @@ IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 	CREATE NONCLUSTERED INDEX IX_audits_by_user ON dda.[audits] ([user], [timestamp], [schema], [table]);
 
 	CREATE NONCLUSTERED INDEX IX_audits_by_table ON dda.[audits] ([schema], [table], [timestamp]);
+END;
 
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID('dda.audits') AND [name] = N'operation' AND [max_length] = 9) BEGIN 
+	ALTER TABLE dda.[audits] ALTER COLUMN [operation] char(6) NOT NULL;
 END;
