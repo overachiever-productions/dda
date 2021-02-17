@@ -146,6 +146,7 @@ AS
 		sys.[objects]
 	WHERE 
 		[type] = 'U'
+		AND SCHEMA_NAME([schema_id]) <> 'dda'
 	ORDER BY 
 		[name];
 
