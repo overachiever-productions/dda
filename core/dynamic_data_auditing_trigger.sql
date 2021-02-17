@@ -295,8 +295,6 @@ AS
 
 	END;
 
-PRINT @sql;
-
 	DECLARE @json nvarchar(MAX); 
 	EXEC sp_executesql 
 		@sql, 

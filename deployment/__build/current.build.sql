@@ -273,7 +273,7 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 6. Notify of need to run dda.update_trigger_definitions if/as needed:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true') BEGIN 
+IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true' AND OBJECT_NAME(t.[object_id]) <> N'dynamic_data_auditing_trigger_template') BEGIN 
 	SELECT N'Deployed DDA Triggers Detected' [scan_outcome], N'Please execute dda.update_trigger_definitions.' [recommendation], N'NOTE: Set @PrintOnly = 0 on dda.update_trigger_definitions to MAKE changes. By default, it only shows WHICH changes it WOULD make.' [notes];
 
 END;
