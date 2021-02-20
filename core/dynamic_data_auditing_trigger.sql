@@ -5,88 +5,43 @@
 		format/specification of the "FOR INSERT, UPDATE, DELETE" text in the following trigger definition. 
 			i.e., changing whitespace can/could/would-probably break 'stuff'. 
 
-	 vNEXT: 
-		Look into detecting non-UPDATING updates i.e., SET x = y, a = b ... as the UPDATE but where x is ALREADY y, and a is ALREADY b 
-			(i.e., full or partial removal of 'duplicates'/non-changes is what we're after - i.e., if x and a were only columns in SET of UPDATE and there are no changes, 
-				maybe BAIL and don't record this? whereas if it was x OR a that had a change, just record the ONE that changed?
 
 
-	COMPOSITE KEYS:
-		If there's 1x row. it's easy: 
-			a. detect that there was a change to the keys (meta-data should make this easy enough and/or check columns_changed vs keys - i.e.,, i've already established both... )
-			b. again, if it's a single row - it's just a TOP (1) JOIN or something stupid (i.e., hard-coded SELECT/grab against old/new - the end). 
-
-		If there are > 1 rows modified
-			a. dayum. 
-			b. unless 
-				1. inserted and deleted both 100% get 'populated' in the same order 
-				AND
-				2. I can somehow ROW_NUMBER() them OUT of those tables in a 100% predictable order... 
-					then game over. seriously. 
-						
-						Assume a table with the following columns:
-								ID
-								SequenceNumber 
-
-						And values of: 
-								1, 1
-								1, 2
-								1, 3
-
-						And this UPDATE:
-							UPDATE myTable SET SequenceNumber = SequenceNumber + 1 WHERE ID = 1; 
-
-								that's 3x rows... changes
-									unless i KNOW that 'row 1' of deleted is the SAME as 'row 1' of inserted.. there's no way to glue this stuff together. 
-										period. i could try various hashes, various CROSS joins, but ... therey're not going to give me the kinds of results i need. 
-
-
-							So, the tests I need to determine how inserted/delete behave (and how ROW_NUMBER() OVER() work... ) 
-								would be: 
-									- ID + SequenceNumber and the UPDATE above - 
-									- similar, but one x of the above as a string/text
-									- ditto, but decimal
-									- ditto, but both strings
-									- ditto, both decimal
-
-									and so on... 
-
-							Finally, 
-								IF composite keys don't work - with multiple rows. 
-								then, the only 'fix'/work-around would be
-
-									a. add a new IDENTITY or GUID column called, say, row_id. 
-									b. doing ONE of the following: 
-											i. changing the table's PK from, say, TaskID, StepID to -> row_id. 
-													this ... positively sucks and wouldn't make sense in many environments
-													plus... it just sucks and ... it sucks. 
-
-											ii. LEAVING the existing, composite, PK 100% alone and as-is. 
-												marking row_id as a 'surrogate' key. 
-													this way, the table still 100% works as expected and auditing can/will happen based on this new 'key'. 
-
-													the RUB/concern with this work-around is: 
-														surrogate_keys, currently, are what we use if/when we can't find a DEFINITIVE key. 
-															i could flip that around or something, but that's a bad idea. 
-																Surrogate Keys <> CompositeKey-Link-Thingies. 
-																	Meaning, I need a second table: dda.composite_key_workarounds
-
-																	And, with such a key, behavior could be: 
-																		A. WARN users about composite keys during install/configuration "hey, this is a composite key, multi-row updates will suck/fail, yous should 1. add a NEW_ID() and 2. a mapping in such and such table"
-																		B. if/when the trigger detects that LEGIT PK rows are/were in the changed columns... 
-																				if it's just 1x row... done and done (assuming it's easier to just grab before/after without looking up the 'work-around-composite-key'. 
-																					otherwise, if it's > 1 row or using the work-around-composite_key is EASIER... just 'bind' on those values instead. 
-
-															And, the take-away here is: 
-																many environments might already have an IDENTITY or ROW_GUID_COL() type row in place anyhow - i.e., on their tables AND a composite key. 
-																	erven if they don't, they MIGHT??? have some other column that IS a 'glue-y' enough (distinct enough per composite-key-pairs) that it COULD work. 
-																		if not, adding this column, while it sucks, would be a small price to pay. 
-																				adding this column though would, of course, be a size of data operation. 
-																					BUT
-																						I could help them implement that with docs and guidance on: 
-																							1. ALTER yourTable ADD row_guid_magic uniqueidentifier NULL. 
-																							2. NIBBLING UPDATEs. 
-																							3. ALTER ... NON NULL + DEFAULT - to decrease down-time and so on. 
+			-- example of dump syntax.
+			[
+				{
+					"key": [{}],
+					"detail": [{}],
+					"dump": [
+						{
+							"deleted": [
+								{
+									"PKColumn": 35,
+									"AnotherColumn": 77.4, 
+									"ThirdColumn": "nnnnnnn"
+								},
+								{
+									"PKColumn": 36,
+									"AnotherColumn": 99.2,
+									"ThirdColumn": "mmmmmmm"
+								}
+							],
+							"inserted": [
+								{
+									"PKColumn": 135,
+									"AnotherColumn": 177.4,
+									"ThirdColumn": "xxxx"
+								},
+								{
+									"PKColumn": 236,
+									"AnotherColumn": 299.2,
+									"ThirdColumn": "yyyyy"
+								}
+							]
+						}
+					]
+				}
+			]
 
 
 */
@@ -129,12 +84,12 @@ AS
 		END;
 
 	IF UPPER(@operationType) IN (N'INSERT', N'UPDATE') BEGIN
-		SELECT NEWID() [dda_trigger_id], * INTO #temp_inserted FROM inserted;
+		SELECT NEWID() [dda_trigger_id], CAST(-1 AS int) [checksum], * INTO #temp_inserted FROM inserted;
 		SELECT @rowCount = @@ROWCOUNT;
 	END;
 	
 	IF UPPER(@operationType) IN (N'DELETE', N'UPDATE') BEGIN
-		SELECT NEWID() [dda_trigger_id], * INTO #temp_deleted FROM deleted;
+		SELECT NEWID() [dda_trigger_id], CAST(-1 AS int) [checksum], * INTO #temp_deleted FROM deleted;
 		SELECT @rowCount = ISNULL(NULLIF(@rowCount, -1), @@ROWCOUNT);
 	END;
 
@@ -224,7 +179,7 @@ AS
 		SELECT
 			@keys = @keys +  N'[i2].' + QUOTENAME([result]) + N',', 
 			@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N' AND ', 
-			@rawKeys = @rawKeys + [result] + N','
+			@rawKeys = @rawKeys + QUOTENAME([result]) + N','
  		FROM 
 			dda.[split_string](@pkColumns, N',', 1) 
 		ORDER BY 
@@ -234,7 +189,7 @@ AS
 
 		SELECT
 			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.from], ' + @crlf + @tab + @tab + @tab + N'[i2].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.to], ',
-			@rawColumnNames = @rawColumnNames + [column_name] + N','
+			@rawColumnNames = @rawColumnNames + QUOTENAME([column_name]) + N','
 		FROM 
 			dda.[translate_modified_columns](@auditedTable, @changeMap)
 		WHERE 
@@ -267,6 +222,7 @@ AS
 		IF @keyUpdate = 1 BEGIN 
 
 			IF @rowCount = 1 BEGIN
+				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
 				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
 			  END;
@@ -283,6 +239,43 @@ AS
 
 				RAISERROR(N'Multi-Row UPDATEs that change Primary Key Values are not YET supported. This change was allowed (vs ROLLED back/terminated), but NOT captured correctly.', 16, 1);
 			END;
+		  END;
+		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
+			DECLARE @isRotate bit = 0;
+
+			DECLARE @rotateSQL nvarchar(MAX) = N'			WITH delete_sums AS (
+				SELECT 
+					' + @rawKeys + N', 
+					CHECKSUM(' + @rawColumnNames + N') [changesum]
+				FROM 
+					[#temp_deleted]
+			), 
+			insert_sums AS (
+				SELECT
+					' + @rawKeys + N', 
+					CHECKSUM(' + @rawColumnNames + N') [changesum]
+				FROM 
+					[#temp_inserted]
+			), 
+			comparisons AS ( 
+				SELECT 
+					' + @keys + N',
+					CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
+				FROM 
+					[delete_sums] d 
+					INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
+			)
+
+			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+
+			EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			
+			EXEC sp_executesql 
+				@rotateSQL, 
+				N'@isRotate bit OUTPUT', 
+				@isRotate = @isRotate OUTPUT;
+
+			IF @isRotate = 1 SET @operationType = 'ROTATE';
 		END;
 
 		SET @sql  = REPLACE(@sql, N'{FROM_CLAUSE}', N'[#temp_inserted] [i]');
