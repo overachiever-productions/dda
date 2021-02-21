@@ -5,8 +5,6 @@
 		format/specification of the "FOR INSERT, UPDATE, DELETE" text in the following trigger definition. 
 			i.e., changing whitespace can/could/would-probably break 'stuff'. 
 
-
-
 			-- example of dump syntax.
 			[
 				{
@@ -84,12 +82,12 @@ AS
 		END;
 
 	IF UPPER(@operationType) IN (N'INSERT', N'UPDATE') BEGIN
-		SELECT NEWID() [dda_trigger_id], CAST(-1 AS int) [checksum], * INTO #temp_inserted FROM inserted;
+		SELECT NEWID() [dda_trigger_id], * INTO #temp_inserted FROM inserted;
 		SELECT @rowCount = @@ROWCOUNT;
 	END;
 	
 	IF UPPER(@operationType) IN (N'DELETE', N'UPDATE') BEGIN
-		SELECT NEWID() [dda_trigger_id], CAST(-1 AS int) [checksum], * INTO #temp_deleted FROM deleted;
+		SELECT NEWID() [dda_trigger_id], * INTO #temp_deleted FROM deleted;
 		SELECT @rowCount = ISNULL(NULLIF(@rowCount, -1), @@ROWCOUNT);
 	END;
 
@@ -122,6 +120,8 @@ AS
 	DECLARE @columnNames nvarchar(MAX) = N'';
 	DECLARE @crlf nchar(2) = NCHAR(13) + NCHAR(10); 
 	DECLARE @tab nchar(1) = NCHAR(9);
+
+	DECLARE @json nvarchar(MAX) = NULL;  -- can/will be set to a "dump" in UPDATEs if multi-row UPDATE of PKs happens.
 
 	-- INSERT/DELETE: grab everything.
 	IF UPPER(@operationType) IN (N'INSERT', N'DELETE') BEGIN 
@@ -227,17 +227,38 @@ AS
 				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
 			  END;
 			ELSE BEGIN 
-				-- vNEXT: 
-				-- 1. Check for a secondary key/mapping in dda.secondary_keys. 
-				-- 2. If that exists, SET @joinKeys = N'[i2].[key_name_1] = [d].[key_name_1] AND ... etc';
-				--		done. 
+				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
+				DECLARE @secondaryKeys nvarchar(260);
+				SELECT @secondaryKeys = [serialized_secondary_columns] FROM [dda].[secondary_keys] WHERE [schema] = @schemaName AND [table] = @tableName;
 
-				-- 3. If the above mappings do NOT exit: 
-				--	@json/output will need to look like: [{ "keys": [{"Hmmm. not even sure this works"}], "detail":{[ "probably nothing here too?" }], "dump": {[ throw "deleted" and "inserted" into here as SELECT * from each" "}] }]
-				--		so, yeah, actually... if/when there's NOT a secondary key and MULTIPLE ROWS were updated, I THINK the reality is... 
-				--		i don't/won't have a 3rd node to add. I think there will ONLY be "deleted" and "inserted" results - the end? 
+				IF @secondaryKeys IS NOT NULL BEGIN 
 
-				RAISERROR(N'Multi-Row UPDATEs that change Primary Key Values are not YET supported. This change was allowed (vs ROLLED back/terminated), but NOT captured correctly.', 16, 1);
+						SET @joinKeys = N'';
+						SELECT 
+							@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N', '
+						FROM 
+							dda.[split_string](@secondaryKeys, N',', 1)
+						ORDER BY 
+							[row_id];
+
+						SET @joinKeys = LEFT(@joinKeys, LEN(@joinKeys) - 1);
+				  END;
+				ELSE BEGIN 
+					-- vNEXT: 
+					--	another, advanced option, before 'having to dump' would be: 1. get all columns in/from the table being modified, 2. exclude those in COLUMNS_UPDATED(), 
+					--		3. see if either a) a checksum of those remaining columns or b) one or more? of those columns could be used as a uniqueifier.
+					
+					-- execute a DUMP - of ALL columns (and all rows). Start by removing dda_trigger_id column (it's no longer useful - and just 'clutters'/confuses output):
+					ALTER TABLE [#temp_deleted] DROP COLUMN [dda_trigger_id];
+					ALTER TABLE [#temp_inserted] DROP COLUMN [dda_trigger_id];
+
+					SET @json = N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":{deleted},"inserted":{inserted}}]}]';
+					SET @json = REPLACE(@json, N'{deleted}', (SELECT * FROM [#temp_deleted] FOR JSON PATH));
+					SET @json = REPLACE(@json, N'{inserted}', (SELECT * FROM [#temp_inserted] FOR JSON PATH));
+
+					RAISERROR(N'Dynamic Data Audits Warning:%s%sMulti-row UPDATEs that modify Primary Key values cannot be tracked without a mapping in dda.secondary_keys.%s%sThis operation was allowed, but resulted in a "dump" to dda.audits vs row-by-row change-tracking details.', 8, 1, @crlf, @tab, @crlf, @tab);
+				END;
+				
 			END;
 		  END;
 		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
@@ -287,12 +308,13 @@ AS
 		SET @sql = REPLACE(@sql, N'{detail_from_and_where}', @crlf + @tab + @tab + @tab + N'[#temp_inserted] [i2]' + @crlf + @tab + @tab + @tab + N'INNER JOIN [#temp_deleted] [d] ON ' + @joinKeys + @crlf + @tab + @tab + N' WHERE [i].[dda_trigger_id] = [i2].[dda_trigger_id]');
 
 	END;
-
-	DECLARE @json nvarchar(MAX); 
-	EXEC sp_executesql 
-		@sql, 
-		N'@json nvarchar(MAX) OUTPUT', 
-		@json = @json OUTPUT;
+	
+	IF @json IS NULL BEGIN 
+		EXEC sp_executesql 
+			@sql, 
+			N'@json nvarchar(MAX) OUTPUT', 
+			@json = @json OUTPUT;
+	END;
 
 	INSERT INTO [dda].[audits] (
 		[timestamp],
