@@ -234,7 +234,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
@@ -996,7 +996,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
