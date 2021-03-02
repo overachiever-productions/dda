@@ -76,7 +76,7 @@ AS
 			END;
 		END; 
 
-		RAISERROR(N'Target Table %s does NOT have an Explicit Primary Key defined - nor were @SurrogateKeys provided for configuration/setup.', 16, 1);
+		RAISERROR(N'Target Table %s does NOT have an Explicit Primary Key defined - nor were @SurrogateKeys provided for configuration/setup.', 16, 1, @objectName);
 		RETURN -25;
 	END;
 
@@ -121,10 +121,13 @@ EndChecks:
 	ELSE BEGIN 
 		EXEC sp_executesql @sql;
 
+		DECLARE @latestVersion sysname;
+		SELECT @latestVersion = [version_number] FROM dda.version_history WHERE [version_id] = (SELECT MAX(version_id) FROM dda.version_history);
+
 		-- mark the trigger as a DDAT:
 		EXEC [sys].[sp_addextendedproperty]
 			@name = N'DDATrigger',
-			@value = N'true',
+			@value = @latestVersion,
 			@level0type = 'SCHEMA',
 			@level0name = @TargetSchema,
 			@level1type = 'TABLE',

@@ -16,7 +16,7 @@ AS
 
 	IF @definitionID IS NULL BEGIN 
 		-- guessing the chances of this are UNLIKELY (i.e., can't see, say, this SPROC existing but the trigger being gone?), but...still, need to account for this. 
-		RAISERROR(N'Dynamic Data Auditing Trigger Template NOT found against table dda.trigger_host. Please re-deploy DDA plumbing before continuing.', 16, -1);
+		RAISERROR(N'Dynamic Data Auditing Trigger Template NOT found against table dda.trigger_host. Please re-deploy core DDA plumbing before continuing.', 16, -1);
 		RETURN -32; 
 	END;
 
@@ -49,6 +49,7 @@ AS
 	CREATE TABLE #dynamic_triggers (
 		[parent_table] nvarchar(260) NULL,
 		[trigger_name] nvarchar(260) NULL,
+		[trigger_version] sysname NULL,
 		[for_insert] int NULL,
 		[for_update] int NULL,
 		[for_delete] int NULL,
@@ -62,6 +63,7 @@ AS
 	INSERT INTO [#dynamic_triggers] (
 		[parent_table],
 		[trigger_name],
+		[trigger_version],
 		[for_insert],
 		[for_update],
 		[for_delete],
@@ -78,8 +80,12 @@ AS
 		RETURN 51;
 	END;
 
-	DECLARE @triggerName sysname, @tableName sysname;
+	DECLARE @triggerName sysname, @tableName sysname, @triggerVersion sysname;
 	DECLARE @disabled bit, @insert bit, @update bit, @delete bit;
+	DECLARE @triggerSchemaName sysname, @triggerTableName sysname, @triggerNameOnly sysname;
+	
+	DECLARE @latestVersion sysname;
+	SELECT @latestVersion = [version_number] FROM dda.version_history WHERE [version_id] = (SELECT MAX(version_id) FROM dda.version_history);
 	
 	DECLARE @firstAs int = PATINDEX(N'%AS%', @body);
 	SET @body = SUBSTRING(@body, @firstAs, LEN(@body) - @firstAs);
@@ -104,6 +110,7 @@ AS
 	SELECT 
 		[trigger_name],
 		[parent_table],
+		[trigger_version],
 		[is_disabled],
 		[for_insert],
 		[for_update],
@@ -112,7 +119,7 @@ AS
 		[#dynamic_triggers];
 	
 	OPEN [cursorName];
-	FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @disabled, @insert, @update, @delete;
+	FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @triggerVersion, @disabled, @insert, @update, @delete;
 	
 	WHILE @@FETCH_STATUS = 0 BEGIN
 	
@@ -161,9 +168,33 @@ AS
 					EXEC sp_executesql 
 						@sql;
 
+					IF @triggerVersion <> @latestVersion BEGIN 
+						
+						SELECT 
+							@triggerSchemaName = PARSENAME(@tableName, 2), 
+							@triggerTableName = PARSENAME(@tableName, 1), 
+							@triggerNameOnly = PARSENAME(@triggerName, 1);
+
+						-- update version in meta-data/extended properties: 
+						EXEC sys.[sp_updateextendedproperty]
+							@name = N'DDATrigger',
+							@value = @latestVersion,
+							@level0type = 'SCHEMA',
+							@level0name = @triggerSchemaName,
+							@level1type = 'TABLE',
+							@level1name = @triggerTableName,
+							@level2type = 'TRIGGER',
+							@level2name = @triggerNameOnly;
+
+						PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N' from version ' + @triggerVersion + N' to version ' + @latestVersion + N'.';
+					  END;
+					ELSE BEGIN 
+						--PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N'....';
+						PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N' to version ' + @latestVersion + N'.';
+					END;
+				
 				COMMIT;
 
-				PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N'....';
 			END TRY
 			BEGIN CATCH 
 				
@@ -187,7 +218,7 @@ AS
 
 		END;
 	
-		FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @disabled, @insert, @update, @delete;
+		FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @triggerVersion, @disabled, @insert, @update, @delete;
 	END;
 	
 	CLOSE [cursorName];
