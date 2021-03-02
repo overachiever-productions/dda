@@ -489,6 +489,22 @@ END;
 
 
 -----------------------------------
+IF OBJECT_ID(N'dda.secondary_keys', N'U') IS NULL BEGIN 
+	
+	CREATE TABLE dda.secondary_keys ( 
+		secondary_id int IDENTITY(1, 1) NOT NULL, 
+		[schema] sysname NOT NULL, 
+		[table] sysname NOT NULL, 
+		[serialized_secondary_columns] nvarchar(260) NOT NULL, 
+		[definition_date] datetime CONSTRAINT DF_secondary_keys_definition_date DEFAULT (GETDATE()), 
+		[notes] nvarchar(MAX) NULL, 
+		CONSTRAINT PK_secondary_keys PRIMARY KEY CLUSTERED ([schema], [table])
+	);
+
+END;
+
+
+-----------------------------------
 IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 
 	CREATE TABLE dda.audits (
@@ -545,7 +561,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -580,7 +596,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -652,7 +668,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -721,7 +737,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -771,88 +787,41 @@ GO
 		format/specification of the "FOR INSERT, UPDATE, DELETE" text in the following trigger definition. 
 			i.e., changing whitespace can/could/would-probably break 'stuff'. 
 
-	 vNEXT: 
-		Look into detecting non-UPDATING updates i.e., SET x = y, a = b ... as the UPDATE but where x is ALREADY y, and a is ALREADY b 
-			(i.e., full or partial removal of 'duplicates'/non-changes is what we're after - i.e., if x and a were only columns in SET of UPDATE and there are no changes, 
-				maybe BAIL and don't record this? whereas if it was x OR a that had a change, just record the ONE that changed?
-
-
-	COMPOSITE KEYS:
-		If there's 1x row. it's easy: 
-			a. detect that there was a change to the keys (meta-data should make this easy enough and/or check columns_changed vs keys - i.e.,, i've already established both... )
-			b. again, if it's a single row - it's just a TOP (1) JOIN or something stupid (i.e., hard-coded SELECT/grab against old/new - the end). 
-
-		If there are > 1 rows modified
-			a. dayum. 
-			b. unless 
-				1. inserted and deleted both 100% get 'populated' in the same order 
-				AND
-				2. I can somehow ROW_NUMBER() them OUT of those tables in a 100% predictable order... 
-					then game over. seriously. 
-						
-						Assume a table with the following columns:
-								ID
-								SequenceNumber 
-
-						And values of: 
-								1, 1
-								1, 2
-								1, 3
-
-						And this UPDATE:
-							UPDATE myTable SET SequenceNumber = SequenceNumber + 1 WHERE ID = 1; 
-
-								that's 3x rows... changes
-									unless i KNOW that 'row 1' of deleted is the SAME as 'row 1' of inserted.. there's no way to glue this stuff together. 
-										period. i could try various hashes, various CROSS joins, but ... therey're not going to give me the kinds of results i need. 
-
-
-							So, the tests I need to determine how inserted/delete behave (and how ROW_NUMBER() OVER() work... ) 
-								would be: 
-									- ID + SequenceNumber and the UPDATE above - 
-									- similar, but one x of the above as a string/text
-									- ditto, but decimal
-									- ditto, but both strings
-									- ditto, both decimal
-
-									and so on... 
-
-							Finally, 
-								IF composite keys don't work - with multiple rows. 
-								then, the only 'fix'/work-around would be
-
-									a. add a new IDENTITY or GUID column called, say, row_id. 
-									b. doing ONE of the following: 
-											i. changing the table's PK from, say, TaskID, StepID to -> row_id. 
-													this ... positively sucks and wouldn't make sense in many environments
-													plus... it just sucks and ... it sucks. 
-
-											ii. LEAVING the existing, composite, PK 100% alone and as-is. 
-												marking row_id as a 'surrogate' key. 
-													this way, the table still 100% works as expected and auditing can/will happen based on this new 'key'. 
-
-													the RUB/concern with this work-around is: 
-														surrogate_keys, currently, are what we use if/when we can't find a DEFINITIVE key. 
-															i could flip that around or something, but that's a bad idea. 
-																Surrogate Keys <> CompositeKey-Link-Thingies. 
-																	Meaning, I need a second table: dda.composite_key_workarounds
-
-																	And, with such a key, behavior could be: 
-																		A. WARN users about composite keys during install/configuration "hey, this is a composite key, multi-row updates will suck/fail, yous should 1. add a NEW_ID() and 2. a mapping in such and such table"
-																		B. if/when the trigger detects that LEGIT PK rows are/were in the changed columns... 
-																				if it's just 1x row... done and done (assuming it's easier to just grab before/after without looking up the 'work-around-composite-key'. 
-																					otherwise, if it's > 1 row or using the work-around-composite_key is EASIER... just 'bind' on those values instead. 
-
-															And, the take-away here is: 
-																many environments might already have an IDENTITY or ROW_GUID_COL() type row in place anyhow - i.e., on their tables AND a composite key. 
-																	erven if they don't, they MIGHT??? have some other column that IS a 'glue-y' enough (distinct enough per composite-key-pairs) that it COULD work. 
-																		if not, adding this column, while it sucks, would be a small price to pay. 
-																				adding this column though would, of course, be a size of data operation. 
-																					BUT
-																						I could help them implement that with docs and guidance on: 
-																							1. ALTER yourTable ADD row_guid_magic uniqueidentifier NULL. 
-																							2. NIBBLING UPDATEs. 
-																							3. ALTER ... NON NULL + DEFAULT - to decrease down-time and so on. 
+			-- example of dump syntax.
+			[
+				{
+					"key": [{}],
+					"detail": [{}],
+					"dump": [
+						{
+							"deleted": [
+								{
+									"PKColumn": 35,
+									"AnotherColumn": 77.4, 
+									"ThirdColumn": "nnnnnnn"
+								},
+								{
+									"PKColumn": 36,
+									"AnotherColumn": 99.2,
+									"ThirdColumn": "mmmmmmm"
+								}
+							],
+							"inserted": [
+								{
+									"PKColumn": 135,
+									"AnotherColumn": 177.4,
+									"ThirdColumn": "xxxx"
+								},
+								{
+									"PKColumn": 236,
+									"AnotherColumn": 299.2,
+									"ThirdColumn": "yyyyy"
+								}
+							]
+						}
+					]
+				}
+			]
 
 
 */
@@ -868,7 +837,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @tableName sysname, @schemaName sysname;
 	SELECT 
@@ -934,6 +903,8 @@ AS
 	DECLARE @crlf nchar(2) = NCHAR(13) + NCHAR(10); 
 	DECLARE @tab nchar(1) = NCHAR(9);
 
+	DECLARE @json nvarchar(MAX) = NULL;  -- can/will be set to a "dump" in UPDATEs if multi-row UPDATE of PKs happens.
+
 	-- INSERT/DELETE: grab everything.
 	IF UPPER(@operationType) IN (N'INSERT', N'DELETE') BEGIN 
 		DECLARE @tempTableName sysname = N'tempdb..#temp_inserted';
@@ -990,7 +961,7 @@ AS
 		SELECT
 			@keys = @keys +  N'[i2].' + QUOTENAME([result]) + N',', 
 			@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N' AND ', 
-			@rawKeys = @rawKeys + [result] + N','
+			@rawKeys = @rawKeys + QUOTENAME([result]) + N','
  		FROM 
 			dda.[split_string](@pkColumns, N',', 1) 
 		ORDER BY 
@@ -1000,7 +971,7 @@ AS
 
 		SELECT
 			@columnNames = @columnNames + N'[d].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.from], ' + @crlf + @tab + @tab + @tab + N'[i2].' + QUOTENAME([column_name]) + N' [' + [column_name] + N'.to], ',
-			@rawColumnNames = @rawColumnNames + [column_name] + N','
+			@rawColumnNames = @rawColumnNames + QUOTENAME([column_name]) + N','
 		FROM 
 			dda.[translate_modified_columns](@auditedTable, @changeMap)
 		WHERE 
@@ -1033,22 +1004,81 @@ AS
 		IF @keyUpdate = 1 BEGIN 
 
 			IF @rowCount = 1 BEGIN
+				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
 				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
 			  END;
 			ELSE BEGIN 
-				-- vNEXT: 
-				-- 1. Check for a secondary key/mapping in dda.secondary_keys. 
-				-- 2. If that exists, SET @joinKeys = N'[i2].[key_name_1] = [d].[key_name_1] AND ... etc';
-				--		done. 
+				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
+				DECLARE @secondaryKeys nvarchar(260);
+				SELECT @secondaryKeys = [serialized_secondary_columns] FROM [dda].[secondary_keys] WHERE [schema] = @schemaName AND [table] = @tableName;
 
-				-- 3. If the above mappings do NOT exit: 
-				--	@json/output will need to look like: [{ "keys": [{"Hmmm. not even sure this works"}], "detail":{[ "probably nothing here too?" }], "dump": {[ throw "deleted" and "inserted" into here as SELECT * from each" "}] }]
-				--		so, yeah, actually... if/when there's NOT a secondary key and MULTIPLE ROWS were updated, I THINK the reality is... 
-				--		i don't/won't have a 3rd node to add. I think there will ONLY be "deleted" and "inserted" results - the end? 
+				IF @secondaryKeys IS NOT NULL BEGIN 
 
-				RAISERROR(N'Multi-Row UPDATEs that change Primary Key Values are not YET supported. This change was allowed (vs ROLLED back/terminated), but NOT captured correctly.', 16, 1);
+						SET @joinKeys = N'';
+						SELECT 
+							@joinKeys = @joinKeys + N'[i2].' + QUOTENAME([result]) + N' = [d].' + QUOTENAME([result]) + N', '
+						FROM 
+							dda.[split_string](@secondaryKeys, N',', 1)
+						ORDER BY 
+							[row_id];
+
+						SET @joinKeys = LEFT(@joinKeys, LEN(@joinKeys) - 1);
+				  END;
+				ELSE BEGIN 
+					-- vNEXT: 
+					--	another, advanced option, before 'having to dump' would be: 1. get all columns in/from the table being modified, 2. exclude those in COLUMNS_UPDATED(), 
+					--		3. see if either a) a checksum of those remaining columns or b) one or more? of those columns could be used as a uniqueifier.
+					
+					-- execute a DUMP - of ALL columns (and all rows). Start by removing dda_trigger_id column (it's no longer useful - and just 'clutters'/confuses output):
+					ALTER TABLE [#temp_deleted] DROP COLUMN [dda_trigger_id];
+					ALTER TABLE [#temp_inserted] DROP COLUMN [dda_trigger_id];
+
+					SET @json = N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":{deleted},"inserted":{inserted}}]}]';
+					SET @json = REPLACE(@json, N'{deleted}', (SELECT * FROM [#temp_deleted] FOR JSON PATH));
+					SET @json = REPLACE(@json, N'{inserted}', (SELECT * FROM [#temp_inserted] FOR JSON PATH));
+
+					RAISERROR(N'Dynamic Data Audits Warning:%s%sMulti-row UPDATEs that modify Primary Key values cannot be tracked without a mapping in dda.secondary_keys.%s%sThis operation was allowed, but resulted in a "dump" to dda.audits vs row-by-row change-tracking details.', 8, 1, @crlf, @tab, @crlf, @tab);
+				END;
+				
 			END;
+		  END;
+		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
+			DECLARE @isRotate bit = 0;
+
+			DECLARE @rotateSQL nvarchar(MAX) = N'			WITH delete_sums AS (
+				SELECT 
+					' + @rawKeys + N', 
+					CHECKSUM(' + @rawColumnNames + N') [changesum]
+				FROM 
+					[#temp_deleted]
+			), 
+			insert_sums AS (
+				SELECT
+					' + @rawKeys + N', 
+					CHECKSUM(' + @rawColumnNames + N') [changesum]
+				FROM 
+					[#temp_inserted]
+			), 
+			comparisons AS ( 
+				SELECT 
+					' + @keys + N',
+					CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
+				FROM 
+					[delete_sums] d 
+					INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
+			)
+
+			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+
+			EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			
+			EXEC sp_executesql 
+				@rotateSQL, 
+				N'@isRotate bit OUTPUT', 
+				@isRotate = @isRotate OUTPUT;
+
+			IF @isRotate = 1 SET @operationType = 'ROTATE';
 		END;
 
 		SET @sql  = REPLACE(@sql, N'{FROM_CLAUSE}', N'[#temp_inserted] [i]');
@@ -1060,12 +1090,13 @@ AS
 		SET @sql = REPLACE(@sql, N'{detail_from_and_where}', @crlf + @tab + @tab + @tab + N'[#temp_inserted] [i2]' + @crlf + @tab + @tab + @tab + N'INNER JOIN [#temp_deleted] [d] ON ' + @joinKeys + @crlf + @tab + @tab + N' WHERE [i].[dda_trigger_id] = [i2].[dda_trigger_id]');
 
 	END;
-
-	DECLARE @json nvarchar(MAX); 
-	EXEC sp_executesql 
-		@sql, 
-		N'@json nvarchar(MAX) OUTPUT', 
-		@json = @json OUTPUT;
+	
+	IF @json IS NULL BEGIN 
+		EXEC sp_executesql 
+			@sql, 
+			N'@json nvarchar(MAX) OUTPUT', 
+			@json = @json OUTPUT;
+	END;
 
 	INSERT INTO [dda].[audits] (
 		[timestamp],
@@ -1139,13 +1170,14 @@ CREATE PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
+	@AuditID					int				= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -1163,9 +1195,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF @StartTime IS NULL AND @EndTime IS NULL BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -1188,6 +1220,7 @@ AS
 		{TimeFilters}
 		{Users}
 		{Tables}
+		{AuditID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1203,6 +1236,7 @@ FOR JSON PATH);
 	DECLARE @timeFilters nvarchar(MAX) = N'';
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
+	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -1252,10 +1286,15 @@ FOR JSON PATH);
 		
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
+	
+	IF @AuditID IS NOT NULL BEGIN 
+		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
+	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -1338,7 +1377,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
@@ -1890,13 +1929,14 @@ ALTER PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
+	@AuditID					int				= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -1914,9 +1954,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF @StartTime IS NULL AND @EndTime IS NULL BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N''Queries against Audit data MUST be constrained - either specify @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of constraints.'', 16, 1);
+			RAISERROR(N''Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.'', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -1939,6 +1979,7 @@ AS
 		{TimeFilters}
 		{Users}
 		{Tables}
+		{AuditID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1954,6 +1995,7 @@ FOR JSON PATH);
 	DECLARE @timeFilters nvarchar(MAX) = N'''';
 	DECLARE @users nvarchar(MAX) = N'''';
 	DECLARE @tables nvarchar(MAX) = N'''';
+	DECLARE @auditIdClause nvarchar(MAX) = N'''';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -2004,9 +2046,14 @@ FOR JSON PATH);
 		IF @predicated = 1 SET @tables = N''AND '' + @tables;
 	END;
 
+	IF @AuditID IS NOT NULL BEGIN 
+		SET @auditIdClause = N''[audit_id] = '' + CAST(@AuditID AS sysname);
+	END;
+
 	SET @coreQuery = REPLACE(@coreQuery, N''{TimeFilters}'', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N''{Users}'', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N''{Tables}'', @tables);
+	SET @coreQuery = REPLACE(@coreQuery, N''{AuditID}'', @auditIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -2092,7 +2139,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
@@ -2617,20 +2664,344 @@ IF (SELECT dda.get_engine_version())> 14.0
 
 		Further, the option to transform (or NOT) the data is present as well (useful for troubleshooting/debugging app changes and so on). 
 
+
+	EXEC dda.expand_audit_row
+		@AuditId = 1109, 
+		@TransformOutput = 0;
+
+
+
+	POTENTIAL change to display options. 
+		MIGHT make more sense to use a multi-result-set approach to displaying the output of this sproc. 
+			e.g.,
+				1. raw trace data as a set of results. 
+				2. translated/exploded capture data.... as the second set. 
+				3. if/when row is an UPDATE... then we'd have 2x results sets for [2] - so 2 & 3. 
+
+
+	SOME OTHER ODD ideas:
+		would it be possible to somehow create a TVF that would enable JOINs against the parent/root table and ... dda.audits WHERE table = @TableNameToQuery
+			I would HAVE to 'know' the (Pimary/surrogate) Key details to manage that JOIN... 
+				but... if I've got the @TableName ... i can/could derive that info - right? 
+				yeah... pretty sure I could. 
+
+
+
 */
 
-DROP PROC IF EXISTS dda.get_audit_row; 
+DROP PROC IF EXISTS dda.expand_audit_row; 
 GO 
 
-CREATE PROC dda.get_audit_row 
+CREATE PROC dda.expand_audit_row 
 	@AuditId					int, 
 	@TransformOutput			bit		= 1
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
-	SELECT 'Not implemented yet.' [status];
+	CREATE TABLE #results ( 
+		[row_number] int NOT NULL,
+		[total_rows] int NOT NULL, 
+		[audit_id] int NOT NULL,
+		[timestamp] datetime NOT NULL,
+		[user] sysname NOT NULL,
+		[table] sysname NOT NULL,
+		[transaction_id] sysname NOT NULL,
+		[operation_type] char(6) NOT NULL,
+		[row_count] int NOT NULL,
+		[change_details] nvarchar(max) NULL
+	);
+
+	INSERT INTO [#results] (
+		[row_number],
+		[total_rows],
+		[audit_id],
+		[timestamp],
+		[user],
+		[table],
+		[transaction_id],
+		[operation_type],
+		[row_count],
+		[change_details]
+	)
+	EXEC dda.[get_audit_data]
+		@AuditID = @AuditId,
+		@TransformOutput = @TransformOutput,
+		@FromIndex = 1,
+		@ToIndex = 1;
+
+	DECLARE @operationType char(6);
+	DECLARE @rowCount int; 
+	DECLARE @json nvarchar(MAX);
+	DECLARE @objectName sysname;
+
+	SELECT 
+		@operationType = [operation_type], 
+		@rowCount = [row_count], 
+		@json = [change_details], 
+		@objectName = [table]
+	FROM 
+		[#results]
+
+	IF @TransformOutput = 1 BEGIN
+		-- account for mappings/translations of table-names:
+		SELECT @objectName = [table_name] FROM dda.[translation_tables] WHERE [translated_name] = @objectName;
+	END
+
+	-- Get a list of covered/included columns. (For INSERT/DELETE this should be 'everything' (all columns) BUT.. THERE may have been schema changes/etc. 
+	CREATE TABLE [#current_columns] (
+		row_id int IDENTITY(1,1) NOT NULL, 
+		column_name sysname NOT NULL, 
+		data_type sysname NOT NULL, 
+		max_length int NOT NULL, 
+		[precision] int NOT NULL, 
+		scale int NOT NULL
+	);
+	
+	INSERT INTO [#current_columns] (
+		[column_name],
+		[data_type],
+		[max_length],
+		[precision],
+		[scale]
+	)
+	SELECT
+		c.[name] [column_name], 
+		t.[name] [data_type],
+		c.[max_length], 
+		c.[precision], 
+		c.[scale]
+	FROM
+		[sys].[columns] c
+		LEFT OUTER JOIN sys.types t ON [c].[system_type_id] = [t].[system_type_id]
+	WHERE 
+		[c].[object_id] = OBJECT_ID(@objectName);
+
+
+	CREATE TABLE #json_columns (
+		row_id int IDENTITY(1,1) NOT NULL, 
+		column_name sysname NOT NULL, 
+		json_type int NOT NULL 
+	);
+
+	INSERT INTO [#json_columns] (
+		[column_name],
+		[json_type]
+	)
+	SELECT 
+		y.[Key] [column_name], 
+		y.[Type] [json_type]
+	FROM 
+		[#results] x
+		OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$[0].detail'), '$') z
+		CROSS APPLY OPENJSON(z.[Value], N'$') y
+	WHERE 
+		y.[Key] IS NOT NULL 
+		AND y.[Value] IS NOT NULL;
+
+	DECLARE @expansionQuery nvarchar(MAX) = N'SELECT * FROM #results;'
+
+	EXEC sp_executesql @expansionQuery;
+
+	RETURN 0;
+
+
+	IF UPPER(@operationType) IN ('INSERT', 'DELETE') BEGIN 
+
+		-- For INSERT/DELETE, any columns in #json_columns that are NOT IN [#current_columns] will become sqlvariants.... and... name will be [columnName*] -- meaining... translated as sqlvariant.
+		-- AND, may(?) want to ALSO assume and process rules such that any column CURRENTLY defined against the table will be loaded as NULL or <MISSING> or something like that... 
+
+/*
+Working example from AfdDB:
+						SELECT 
+							a.[audit_id],
+							a.[timestamp],
+							a.[schema],
+							a.[table],
+							a.[user],
+							a.[operation],
+							a.[transaction_id],
+							a.[row_count],
+							a.[audit], 
+							y.*
+						FROM 
+							dda.[audits] a
+							CROSS APPLY OPENJSON(JSON_QUERY([a].[audit], N'$')) x
+							CROSS APPLY OPENJSON(x.[Value], N'$.detail') WITH (UserName sysname '$.UserName', Action sysname '$.Action') y
+						WHERE 
+							a.[audit_id] = 292;
+
+
+				and another:
+
+
+						SELECT 
+							a.[audit_id],
+							a.[timestamp],
+							a.[schema],
+							a.[table],
+							a.[user],
+							a.[operation],
+							a.[transaction_id],
+							a.[row_count],
+							a.[audit], 
+							y.*, 
+							z.*
+						FROM 
+							dda.[audits] a
+							CROSS APPLY OPENJSON(JSON_QUERY([a].[audit], N'$')) x
+							CROSS APPLY OPENJSON(x.[Value], N'$.detail') WITH (UserName sysname '$.UserName', Action sysname '$.Action') y
+							CROSS APPLY OPENJSON(x.[Value], N'$.key') WITH (AuditIndex int N'$.AuditIndex') z
+						WHERE
+							a.[table] = N'AUDIT'
+							AND z.[AuditIndex] > 440;
+
+
+
+That's a DIRECT query against dda.audits - with just 2x columns that i'm extracting... but the structure is correct:
+	I'm first burrowing down into EACH ROW (x)
+	Then, from there, i'm shredding details per each row. 
+
+
+Here's a similar query against a 3x INSERT against Meddling.dbo.SortTable:
+
+						SELECT 
+							[a].[audit_id],
+							[a].[timestamp],
+							[a].[schema],
+							[a].[table],
+							[a].[user],
+							[a].[operation],
+							[a].[transaction_id],
+							[a].[row_count], 
+							[x].[Key] [json_row], 
+	
+							[y].[OrderID],
+							[y].[CustomerID],
+							[y].[Value],
+							[y].[ColChar]
+						FROM 
+							dda.[audits] a 
+							CROSS APPLY OPENJSON(JSON_QUERY([a].[audit], N'$')) x
+							CROSS APPLY OPENJSON(x.[Value], N'$.detail') WITH (
+								OrderID				int					N'$.OrderID',
+								CustomerID			int					N'$.CustomerID', 
+								[Value]				decimal(18,2)		N'$.Value',
+								ColChar				char(500)			N'$.ColChar'
+							) y
+						WHERE 
+							a.[audit_id] = 1109; -- 3 rows... 
+
+	where i'm going to have to, clearly, define/derive: 
+		a. the list of [y].col-names-to-select-from-the-main-cross-apply
+		b. the definitions of the columns in the WITH () clause... 
+
+
+
+	ANd, of course, an UPDATE becomes a lot harder - as it'll be 2 'sets' of queries... 
+		i.e., something like the above but for, say, $.OrderID.from and $.OrderID.to - into, effectively, different results sets...so'z I can show before/after
+
+		And, here's an example of an UPDATE (getting the FROM values):
+
+						SELECT 
+							[a].[audit_id],
+							[a].[timestamp],
+							[a].[schema],
+							[a].[table],
+							[a].[user],
+							[a].[operation],
+							[a].[transaction_id],
+							[a].[row_count], 
+							[x].[Key] [json_row], 
+	
+							[y].[Value],
+							[y].[ColChar]
+
+							,a.[audit]
+						FROM 
+							dda.[audits] a 
+							CROSS APPLY OPENJSON(JSON_QUERY([a].[audit], N'$')) x
+							CROSS APPLY OPENJSON(x.[Value], N'$.detail') WITH (
+								[Value]				decimal(18,2)		N'$.Value.from',
+								ColChar				char(500)			N'$.ColChar.from'
+							) y
+						WHERE 
+							a.[audit_id] = 1013; -- 1 row
+
+
+		Nothing too terrible... 
+
+
+
+*/
+
+
+
+		SET @expansionQuery = N'
+
+		SELECT 
+			r.audit_id, 
+			r.[timestamp], 
+			r.[user], 
+			r.[table], 
+			r.[total_rows], 
+			r.[operation_type], 
+			' ' [ ], -- divider... 
+			x.*  -- i..e, one entry per 'row'
+		FROM 
+			[#results] r
+			INNER JOIN (
+				SELECT 
+					* OR {column_names} -- probably column_names cuz I''ll need to change some of them to columnName* (or potentially change them) if/when they''re sqlvariants... 
+				FROM 
+					OPENJSON(@json)
+				WITH (
+					{column_name	datatype    ''$.detail[0].{columnName''},
+					{column_name	datatype    ''$.detail[0].{columnName''},
+					{column_name	datatype    ''$.detail[0].{columnName''},
+					{column_name	datatype    ''$.detail[0].{columnName''},
+					{etc}
+				)
+			) x -- hmmm... what''s the JOIN here? 
+		';
+
+	  END;
+	ELSE BEGIN -- UPDATE, ROTATE, or MUTATE
+
+
+		SET @expansionQuery = N'SELECT {stuff as above - but for DELETED and, i guess, change column names to previous.{ColumnName} - where ... path = $detail[0].N.{from} ONLY}
+		
+		UNION -- OR just run a totally SECOND select - i.e., 2x distinct selects)
+		
+		SELECT {same-ish, but only for $.detail[0].N.{to} values instead...}
+		';
+
+
+
+
+
+		-- for UPDATEs, we just want a list of columns in the JSON. But, for any columns not in #json_columns, ... load as sqlvariant.
+
+
+		---- get a list of columns 'covered' in the UPDATE:
+		--SELECT 
+		--	[y].[Key] [column] 
+		--FROM 
+		--	[#results] x
+		--	OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$[0].detail'), '$') z
+		--	CROSS APPLY OPENJSON(z.[Value], N'$') y
+		--WHERE 
+		--	y.[Key] IS NOT NULL 
+		--	AND y.[Value] IS NOT NULL;
+	END;
+
+
+	-- run exec sp_executesql 
+	-- but do it in a try/catch. 
+
+	-- if we fail, retry with all columns as ... sqlvariant... then... if that fails, throw an error. 
+
 
 	RETURN 0;
 GO
@@ -2649,11 +3020,12 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SELECT 
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(OBJECT_NAME(o.[object_id])) FROM sys.objects o WHERE o.[object_id] = t.[parent_id]) [parent_table],
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(t.[name]) FROM sys.objects o WHERE o.[object_id] = t.[object_id]) [trigger_name],
+		CAST(p.[value] AS sysname) [trigger_version],
 		(SELECT CASE WHEN EXISTS (SELECT NULL FROM sys.[trigger_events] e WHERE e.[object_id] = t.[object_id] AND [e].[type] = 1) THEN 1 ELSE 0 END) [for_insert],
 		(SELECT CASE WHEN EXISTS (SELECT NULL FROM sys.[trigger_events] e WHERE e.[object_id] = t.[object_id] AND [e].[type] = 2) THEN 1 ELSE 0 END) [for_update],
 		(SELECT CASE WHEN EXISTS (SELECT NULL FROM sys.[trigger_events] e WHERE e.[object_id] = t.[object_id] AND [e].[type] = 3) THEN 1 ELSE 0 END) [for_delete],
@@ -2666,7 +3038,7 @@ AS
 		sys.triggers t
 		INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id]
 	WHERE 
-		p.[name] = N'DDATrigger' AND p.[value] = 'true'
+		p.[name] = N'DDATrigger' AND p.[value] IS NOT NULL
 		AND 
 			-- don't show the dynamic trigger TEMPLATE - that'll just cause confusion:
 			t.[parent_id] <> (SELECT [object_id] FROM sys.objects WHERE [schema_id] = SCHEMA_ID('dda') AND [name] = N'trigger_host');
@@ -2689,7 +3061,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -2799,10 +3171,13 @@ EndChecks:
 	ELSE BEGIN 
 		EXEC sp_executesql @sql;
 
+		DECLARE @latestVersion sysname;
+		SELECT @latestVersion = [version_number] FROM dda.version_history WHERE [version_id] = (SELECT MAX(version_id) FROM dda.version_history);
+
 		-- mark the trigger as a DDAT:
 		EXEC [sys].[sp_addextendedproperty]
 			@name = N'DDATrigger',
-			@value = N'true',
+			@value = @latestVersion,
 			@level0type = 'SCHEMA',
 			@level0name = @TargetSchema,
 			@level1type = 'TABLE',
@@ -2838,7 +3213,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @TriggerNamePattern = ISNULL(NULLIF(@TriggerNamePattern, N''), N'ddat_{0}');
@@ -3183,9 +3558,6 @@ Reporting:
 
 			END;
 
-
-
-
 			FETCH NEXT FROM [walker] INTO @schemaName, @tableName, @triggerName, @isDisabled, @isNonStandard;
 		END;
 		
@@ -3239,7 +3611,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3535.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v2.0.3547.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -3249,7 +3621,7 @@ AS
 
 	IF @definitionID IS NULL BEGIN 
 		-- guessing the chances of this are UNLIKELY (i.e., can't see, say, this SPROC existing but the trigger being gone?), but...still, need to account for this. 
-		RAISERROR(N'Dynamic Data Auditing Trigger Template NOT found against table dda.trigger_host. Please re-deploy DDA plumbing before continuing.', 16, -1);
+		RAISERROR(N'Dynamic Data Auditing Trigger Template NOT found against table dda.trigger_host. Please re-deploy core DDA plumbing before continuing.', 16, -1);
 		RETURN -32; 
 	END;
 
@@ -3282,6 +3654,7 @@ AS
 	CREATE TABLE #dynamic_triggers (
 		[parent_table] nvarchar(260) NULL,
 		[trigger_name] nvarchar(260) NULL,
+		[trigger_version] sysname NULL,
 		[for_insert] int NULL,
 		[for_update] int NULL,
 		[for_delete] int NULL,
@@ -3295,6 +3668,7 @@ AS
 	INSERT INTO [#dynamic_triggers] (
 		[parent_table],
 		[trigger_name],
+		[trigger_version],
 		[for_insert],
 		[for_update],
 		[for_delete],
@@ -3311,8 +3685,12 @@ AS
 		RETURN 51;
 	END;
 
-	DECLARE @triggerName sysname, @tableName sysname;
+	DECLARE @triggerName sysname, @tableName sysname, @triggerVersion sysname;
 	DECLARE @disabled bit, @insert bit, @update bit, @delete bit;
+	DECLARE @triggerSchemaName sysname, @triggerTableName sysname, @triggerNameOnly sysname;
+	
+	DECLARE @latestVersion sysname;
+	SELECT @latestVersion = [version_number] FROM dda.version_history WHERE [version_id] = (SELECT MAX(version_id) FROM dda.version_history);
 	
 	DECLARE @firstAs int = PATINDEX(N'%AS%', @body);
 	SET @body = SUBSTRING(@body, @firstAs, LEN(@body) - @firstAs);
@@ -3337,6 +3715,7 @@ AS
 	SELECT 
 		[trigger_name],
 		[parent_table],
+		[trigger_version],
 		[is_disabled],
 		[for_insert],
 		[for_update],
@@ -3345,7 +3724,7 @@ AS
 		[#dynamic_triggers];
 	
 	OPEN [cursorName];
-	FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @disabled, @insert, @update, @delete;
+	FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @triggerVersion, @disabled, @insert, @update, @delete;
 	
 	WHILE @@FETCH_STATUS = 0 BEGIN
 	
@@ -3394,9 +3773,33 @@ AS
 					EXEC sp_executesql 
 						@sql;
 
+					IF @triggerVersion <> @latestVersion BEGIN 
+						
+						SELECT 
+							@triggerSchemaName = PARSENAME(@tableName, 2), 
+							@triggerTableName = PARSENAME(@tableName, 1), 
+							@triggerNameOnly = PARSENAME(@triggerName, 1);
+
+						-- update version in meta-data/extended properties: 
+						EXEC sys.[sp_updateextendedproperty]
+							@name = N'DDATrigger',
+							@value = @latestVersion,
+							@level0type = 'SCHEMA',
+							@level0name = @triggerSchemaName,
+							@level1type = 'TABLE',
+							@level1name = @triggerTableName,
+							@level2type = 'TRIGGER',
+							@level2name = @triggerNameOnly;
+
+						PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N' from version ' + @triggerVersion + N' to version ' + @latestVersion + N'.';
+					  END;
+					ELSE BEGIN 
+						--PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N'....';
+						PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N' to version ' + @latestVersion + N'.';
+					END;
+				
 				COMMIT;
 
-				PRINT N'Updated ' + @triggerName + N' on ' + @tableName + N'....';
 			END TRY
 			BEGIN CATCH 
 				
@@ -3420,7 +3823,7 @@ AS
 
 		END;
 	
-		FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @disabled, @insert, @update, @delete;
+		FETCH NEXT FROM [cursorName] INTO @triggerName, @tableName, @triggerVersion, @disabled, @insert, @update, @delete;
 	END;
 	
 	CLOSE [cursorName];
@@ -3449,8 +3852,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'2.0.3535.1';
-DECLARE @VersionDescription nvarchar(200) = N'Test Build.';
+DECLARE @CurrentVersion varchar(20) = N'2.0.3547.1';
+DECLARE @VersionDescription nvarchar(200) = N'Minor Bug-Fixes + Multi-Row Key-Change Capture Improvements.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
