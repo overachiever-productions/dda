@@ -1,5 +1,32 @@
 # Change Log
 
+## [2.0] - 2021-03-01 
+Minor Bug-Fixes + Multi-Row Key-Change Capture Improvements.
+
+## Known-Issues: :zap: 
+1. Issue from version 1.3 with translation mappings that can 'break' JSON 'data-types' remains - and will be fixed in v3.0. 
+
+## Added 
+- Addition of new `ROTATE` capture - i.e., 1st-class capture/audit record on par with `INSERT`, `UPDATE`, and `DELETE` where a `ROTATE` is simply an `UPDATE` where NO data (at ALL) was logically changed (e.g., `UPDATE dbo.Users SET FirstName = 'Mike' WHERE FirstName = 'Mike';` can/will 'update' any rows where the `FirstName` value was `'Mike'`, but this 'update' didn't truly change any data and was just 'spinning its wheels' - and will be listed in dda.audits.operation as a `'ROTATE'`). RATIONALE: A `ROTATE` can be easily excluded from search and/or regularly deleted from dda.audits via cleanup logic - but the CAPTURE of `ROTATE` operations allows admins/devs to identify 'useless'/non-optimal operations that might be causing excessive 'changes' when NO REAL changes are occuring.
+
+- `dda.secondary_keys` - table that allows for addition of secondary-keys (i.e., surrogate keys for tables with PKs) to enable row-by-row capture of modifications to Primary Key Columns for MULTI-ROW UPDATES (e.g., assume a PK exists with `JobID` and `StepID` as a compound key - and an UPDATE changes all `StepID` values in said table for `JobID` = 337 to `StepID = StepID + 25`; at this point, N number of rows have had their PK changed - and there is EITHER a surrogate/secondary key defined that'll let us track these changes row-by-row (between `DELETED` and `INSERTED`) or ... a `"dump"` will occur).     
+
+***NOTE:** dump operations will be marked as a `MUTATE` in the `dda.audits.operation` column - to make operations with a non-trackable set of PK modifications easier to spot.*  
+
+- Addition of `"dump"` node in JSON for scenarios where a) MULTI-ROW UPDATEs are fired, b) Primary Key columns (1 or more) have been MODIFIED, c) there's no dda.secondary_key mapping defined. NOTE: single-row changes to PKs columns and multi-row INSERT/DELETE operations (involving PK columns) are not subject to needing secondary keys or being dumped.   
+  
+***NOTE:** a "dump" is full output from the `DELETED` and `INSERTED` pseudo-tables from within the dynamic data auditing trigger - and a future version of DDA will provide some options for POST-DUMP mapping/remapping to remove "dumps" by enable re-processing of secondary keys. Otherwise, if/when MULTIPLE rows have their PK values changed (and there's no secondary mapping) it's currently impossible to be 100% certain of which rows in `DELETED` correspond to which rows in `INSERTED` - hence the `"dump"`. (A future version MAY look at hashing and/or evaluating non-modified columns during a `MUTATE` operation to attempt to 'glue' `DELETED` and `INSERTED` rows back together when this can be done with 100% certainty and without causing significant perf overhead.)*
+
+- `dda.list_dynamic_triggers` now shows version information about the DDA version for each dynamic trigger deployed. Likewise, executing `dda.update_dynamic_triggers` reports on version changes. 
+
+- Rough-in/Stub for API documentation added. (Not yet ready for 'publication' - but placeholders now exist in project structure/code-base.)
+
+- Initial addition of tSQLt Unit Tests have been 'stubbed' into project structure.
+
+## Fixed
+- Miscellaneous/Minor fixes to address potential problems with "string or binary data would be truncated errors", knock dda.audits.operation (type) column down to char(6) vs char(9).
+
+
 ## [1.3] - 2021-02-15
 Bug-Fixes + Improvements to core functionality.
 
