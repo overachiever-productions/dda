@@ -27,6 +27,7 @@ CREATE PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
+	@AuditID					int				= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -51,9 +52,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF @StartTime IS NULL AND @EndTime IS NULL BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -76,6 +77,7 @@ AS
 		{TimeFilters}
 		{Users}
 		{Tables}
+		{AuditID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -91,6 +93,7 @@ FOR JSON PATH);
 	DECLARE @timeFilters nvarchar(MAX) = N'';
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
+	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -140,10 +143,15 @@ FOR JSON PATH);
 		
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
+	
+	IF @AuditID IS NOT NULL BEGIN 
+		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
+	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -162,7 +170,7 @@ FOR JSON PATH);
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
 		[user] sysname NOT NULL,
-		[operation_type] char(9) NOT NULL,
+		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
@@ -226,7 +234,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
@@ -778,6 +786,7 @@ ALTER PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
+	@AuditID					int				= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -802,9 +811,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF @StartTime IS NULL AND @EndTime IS NULL BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -827,6 +836,7 @@ AS
 		{TimeFilters}
 		{Users}
 		{Tables}
+		{AuditID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -842,6 +852,7 @@ FOR JSON PATH);
 	DECLARE @timeFilters nvarchar(MAX) = N'';
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
+	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -892,9 +903,14 @@ FOR JSON PATH);
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
 
+	IF @AuditID IS NOT NULL BEGIN 
+		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	END;
+
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
+	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -913,7 +929,7 @@ FOR JSON PATH);
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
 		[user] sysname NOT NULL,
-		[operation_type] char(9) NOT NULL,
+		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
@@ -980,7 +996,7 @@ FOR JSON PATH);
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
 		[translated_from_value_type] int NULL,
-		[to_value] sysname NULL, 
+		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
 		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL

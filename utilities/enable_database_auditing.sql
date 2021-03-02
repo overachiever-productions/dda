@@ -146,6 +146,7 @@ AS
 		sys.[objects]
 	WHERE 
 		[type] = 'U'
+		AND SCHEMA_NAME([schema_id]) <> 'dda'
 	ORDER BY 
 		[name];
 
@@ -363,9 +364,6 @@ Reporting:
 				PRINT N'			NOTE: Trigger ' + @triggerName + N' IS _NOT_ configured for ALL operation types (INSERT, UPDATE, DELETE - i.e., one or more operations is NOT enabled).'
 
 			END;
-
-
-
 
 			FETCH NEXT FROM [walker] INTO @schemaName, @tableName, @triggerName, @isDisabled, @isNonStandard;
 		END;
