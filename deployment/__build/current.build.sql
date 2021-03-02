@@ -184,6 +184,9 @@ END;
 --##INCLUDE: tables\surrogate_keys.sql
 
 -----------------------------------
+--##INCLUDE: tables\secondary_keys.sql
+
+-----------------------------------
 --##INCLUDE: tables\audits.sql
 
 
@@ -229,7 +232,7 @@ END;
 --##INCLUDE: core\get_audit_data.sql
 
 -----------------------------------
---##INCLUDE: core\get_audit_row.sql
+--##INCLUDE: core\expand_audit_row.sql
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------
 -- Utilities:
