@@ -82,9 +82,9 @@ AS
 
 	DECLARE @triggerName sysname, @tableName sysname, @triggerVersion sysname;
 	DECLARE @disabled bit, @insert bit, @update bit, @delete bit;
-	DECLARE @latestVersion sysname;
 	DECLARE @triggerSchemaName sysname, @triggerTableName sysname, @triggerNameOnly sysname;
 	
+	DECLARE @latestVersion sysname;
 	SELECT @latestVersion = [version_number] FROM dda.version_history WHERE [version_id] = (SELECT MAX(version_id) FROM dda.version_history);
 	
 	DECLARE @firstAs int = PATINDEX(N'%AS%', @body);

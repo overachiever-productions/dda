@@ -365,9 +365,6 @@ Reporting:
 
 			END;
 
-
-
-
 			FETCH NEXT FROM [walker] INTO @schemaName, @tableName, @triggerName, @isDisabled, @isNonStandard;
 		END;
 		
