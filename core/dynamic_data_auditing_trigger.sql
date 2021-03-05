@@ -289,7 +289,7 @@ AS
 
 			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
 
-			EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			--EXEC [admindb].dbo.[print_long_string] @rotateSQL;
 			
 			EXEC sp_executesql 
 				@rotateSQL, 
