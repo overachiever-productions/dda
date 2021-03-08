@@ -15,6 +15,18 @@
 				@FromIndex = 20,
 				@ToIndex = 40;
 
+
+		-- AuditID Specific Searches: 
+			EXEC dda.[get_audit_data]
+				@StartAuditID = 1017;
+
+			EXEC dda.[get_audit_data]
+				@StartAuditID = 1017, 
+				@EndAuditID = 1021;
+
+
+
+
 */
 
 DROP PROC IF EXISTS dda.[get_audit_data];
@@ -27,7 +39,10 @@ CREATE PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
-	@AuditID					int				= NULL,
+	@StartAuditID				int				= NULL,
+	@EndAuditID					int				= NULL,
+	@StartTransactionID			sysname			= NULL, 
+	@EndTransactionID			sysname			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -39,6 +54,9 @@ AS
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
+
+	SET @StartTransactionID = NULLIF(@StartTransactionID, N'');
+	SET @EndTransactionID = NULLIF(@EndTransactionID, N'');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
 	SET @ToIndex = ISNULL(@ToIndex, 1);
@@ -52,9 +70,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -76,8 +94,7 @@ AS
 	WHERE 
 		{TimeFilters}
 		{Users}
-		{Tables}
-		{AuditID}
+		{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -94,6 +111,7 @@ FOR JSON PATH);
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
+	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -144,14 +162,64 @@ FOR JSON PATH);
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
 	
-	IF @AuditID IS NOT NULL BEGIN 
-		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	IF @StartAuditID IS NOT NULL BEGIN 
+		IF @EndAuditID IS NULL BEGIN
+			SET @auditIdClause = N'[audit_id] = ' + CAST(@StartAuditID AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
+		END;
+	END;
+
+	IF @StartTransactionID IS NOT NULL BEGIN 
+		DECLARE @year int, @doy int;
+		DECLARE @txDate datetime; 
+		DECLARE @startTx int;
+		DECLARE @endTx int;
+		
+		IF @StartTransactionID LIKE N'%-%' BEGIN 
+			SELECT @year = LEFT(@StartTransactionID, 4);
+			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
+			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+
+			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
+			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
+		  END;
+		ELSE BEGIN 
+			SET @startTx = TRY_CAST(@StartTransactionID AS int);
+		END;
+
+		IF @EndTransactionID IS NOT NULL BEGIN 
+			IF @EndTransactionID LIKE N'%-%' BEGIN 
+				SET @endTx = RIGHT(@EndTransactionID, 9);
+			  END; 
+			ELSE BEGIN 
+				SET @endTx = TRY_CAST(@EndTransactionID AS int);
+			END;
+
+			SET @transactionIdClause = N'([transaction_id] >= ' + CAST(@startTx AS sysname) + N' AND [transaction_id] <= ' + CAST(@endTx AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @transactionIdClause = N'([transaction_id] = ' + CAST(@startTx AS sysname);
+		END;
+
+		IF @startTx IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -80;
+		END;
+
+		IF @txDate IS NOT NULL BEGIN 
+			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
+		END;
+		
+		SET @transactionIdClause = @transactionIdClause + N')';
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
 	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
+	SET @coreQuery = REPLACE(@coreQuery, N'{TransactionID}', @transactionIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -786,7 +854,10 @@ ALTER PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
-	@AuditID					int				= NULL,
+	@StartAuditID				int				= NULL,
+	@EndAuditID					int				= NULL,
+	@StartTransactionID			sysname			= NULL, 
+	@EndTransactionID			sysname			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -811,9 +882,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -835,8 +906,7 @@ AS
 	WHERE 
 		{TimeFilters}
 		{Users}
-		{Tables}
-		{AuditID}
+		{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -853,6 +923,7 @@ FOR JSON PATH);
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
+	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -903,14 +974,64 @@ FOR JSON PATH);
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
 
-	IF @AuditID IS NOT NULL BEGIN 
-		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	IF @StartAuditID IS NOT NULL BEGIN 
+		IF @EndAuditID IS NULL BEGIN
+			SET @auditIdClause = N'[audit_id] = ' + CAST(@StartAuditID AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
+		END;
+	END;
+
+	IF @StartTransactionID IS NOT NULL BEGIN 
+		DECLARE @year int, @doy int;
+		DECLARE @txDate datetime; 
+		DECLARE @startTx int;
+		DECLARE @endTx int;
+		
+		IF @StartTransactionID LIKE N'%-%' BEGIN 
+			SELECT @year = LEFT(@StartTransactionID, 4);
+			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
+			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+
+			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
+			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
+		  END;
+		ELSE BEGIN 
+			SET @startTx = TRY_CAST(@StartTransactionID AS int);
+		END;
+
+		IF @EndTransactionID IS NOT NULL BEGIN 
+			IF @EndTransactionID LIKE N'%-%' BEGIN 
+				SET @endTx = RIGHT(@EndTransactionID, 9);
+			  END; 
+			ELSE BEGIN 
+				SET @endTx = TRY_CAST(@EndTransactionID AS int);
+			END;
+
+			SET @transactionIdClause = N'([transaction_id] >= ' + CAST(@startTx AS sysname) + N' AND [transaction_id] <= ' + CAST(@endTx AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @transactionIdClause = N'([transaction_id] = ' + CAST(@startTx AS sysname);
+		END;
+
+		IF @startTx IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -80;
+		END;
+
+		IF @txDate IS NOT NULL BEGIN 
+			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
+		END;
+		
+		SET @transactionIdClause = @transactionIdClause + N')';
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
 	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
+	SET @coreQuery = REPLACE(@coreQuery, N'{TransactionID}', @transactionIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
