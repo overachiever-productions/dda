@@ -24,6 +24,15 @@
 				@StartAuditID = 1017, 
 				@EndAuditID = 1021;
 
+		-- TransactionID Specific Searches:
+			EXEC dda.[get_audit_data]
+				@StartTransactionID = '2021-039-017406316';
+
+
+			EXEC dda.[get_audit_data]
+				@StartTransactionID = '2021-039-017406316', 
+				@EndTransactionID = '2021-039-017633755';
+
 
 
 
