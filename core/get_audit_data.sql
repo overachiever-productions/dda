@@ -488,6 +488,84 @@ FOR JSON PATH);
 	WHERE 
 		[to_value] IS NOT NULL; -- ditto... 
 
+	-- address translation_keys: 
+	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
+		
+		CREATE TABLE #translation_key_values (
+			row_id int IDENTITY(1,1) NOT NULL, 
+			source_table sysname NOT NULL, 
+			source_column sysname NOT NULL, 
+			translation_key nvarchar(MAX) NOT NULL, 
+			translation_value nvarchar(MAX) NOT NULL
+		);
+			
+		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
+		DECLARE @translationSql nvarchar(MAX);
+
+		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
+		SELECT 
+			[table_name], 
+			[column_name], 
+			[key_table],
+			[key_column], 
+			[value_column]
+		FROM 
+			dda.[translation_keys] 		
+		
+		OPEN [translator];
+		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		
+		WHILE @@FETCH_STATUS = 0 BEGIN
+		
+			SET @translationSql = N'INSERT INTO #translation_key_values ([source_table], [source_column], [translation_key], [translation_value]) 
+				SELECT @sourceTable [source_table], @sourceColumn [source_column], ' + QUOTENAME(@translationKey) + N' [translation_key], ' + QUOTENAME(@translationValue) + N' [translation_value] 
+				FROM 
+					' + @translationTable + N';'
+
+			EXEC sp_executesql 
+				@translationSql, 
+				N'@sourceTable sysname, @sourceColumn sysname', 
+				@sourceTable = @sourceTable, 
+				@sourceColumn = @sourceColumn;			
+
+			FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		END;
+		
+		CLOSE [translator];
+		DEALLOCATE [translator];
+
+		-- map INSERT/DELETE translations:
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+		-- map FROM / TO translations:
+		UPDATE x 
+		SET
+			x.[translated_from_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+		UPDATE x 
+		SET
+			x.[translated_to_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[to_value] IS NOT NULL; -- ditto... 
+	END;
+
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
@@ -1303,6 +1381,84 @@ FOR JSON PATH);
 			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
 	WHERE 
 		[to_value] IS NOT NULL; -- ditto... 
+
+	-- address translation_keys: 
+	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
+		
+		CREATE TABLE #translation_key_values (
+			row_id int IDENTITY(1,1) NOT NULL, 
+			source_table sysname NOT NULL, 
+			source_column sysname NOT NULL, 
+			translation_key nvarchar(MAX) NOT NULL, 
+			translation_value nvarchar(MAX) NOT NULL
+		);
+			
+		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
+		DECLARE @translationSql nvarchar(MAX);
+
+		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
+		SELECT 
+			[table_name], 
+			[column_name], 
+			[key_table],
+			[key_column], 
+			[value_column]
+		FROM 
+			dda.[translation_keys] 		
+		
+		OPEN [translator];
+		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		
+		WHILE @@FETCH_STATUS = 0 BEGIN
+		
+			SET @translationSql = N'INSERT INTO #translation_key_values ([source_table], [source_column], [translation_key], [translation_value]) 
+				SELECT @sourceTable [source_table], @sourceColumn [source_column], ' + QUOTENAME(@translationKey) + N' [translation_key], ' + QUOTENAME(@translationValue) + N' [translation_value] 
+				FROM 
+					' + @translationTable + N';'
+
+			EXEC sp_executesql 
+				@translationSql, 
+				N'@sourceTable sysname, @sourceColumn sysname', 
+				@sourceTable = @sourceTable, 
+				@sourceColumn = @sourceColumn;			
+
+			FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		END;
+		
+		CLOSE [translator];
+		DEALLOCATE [translator];
+
+		-- map INSERT/DELETE translations:
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+		-- map FROM / TO translations:
+		UPDATE x 
+		SET
+			x.[translated_from_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+		UPDATE x 
+		SET
+			x.[translated_to_value] = v.[translation_value]
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[to_value] IS NOT NULL; -- ditto... 
+	END;
 
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
