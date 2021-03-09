@@ -52,6 +52,7 @@ CREATE PROC dda.[get_audit_data]
 	@EndAuditID					int				= NULL,
 	@StartTransactionID			sysname			= NULL, 
 	@EndTransactionID			sysname			= NULL,
+	@TransactionDate			date			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -195,6 +196,7 @@ FOR JSON PATH);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
 		  END;
 		ELSE BEGIN 
+			IF @TransactionDate IS NOT NULL SET @txDate = @TransactionDate;
 			SET @startTx = TRY_CAST(@StartTransactionID AS int);
 		END;
 
@@ -503,15 +505,18 @@ FOR JSON PATH);
 		DECLARE @translationSql nvarchar(MAX);
 
 		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
-		SELECT 
-			[table_name], 
-			[column_name], 
-			[key_table],
-			[key_column], 
-			[value_column]
+		SELECT DISTINCT
+			tk.[table_name], 
+			tk.[column_name], 
+			tk.[key_table],
+			tk.[key_column], 
+			tk.[value_column]
 		FROM 
-			dda.[translation_keys] 		
-		
+			dda.[translation_keys] tk	
+			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+		WHERE 
+			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
+				
 		OPEN [translator];
 		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
 		
@@ -945,6 +950,7 @@ ALTER PROC dda.[get_audit_data]
 	@EndAuditID					int				= NULL,
 	@StartTransactionID			sysname			= NULL, 
 	@EndTransactionID			sysname			= NULL,
+	@TransactionDate			date			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
@@ -1085,6 +1091,7 @@ FOR JSON PATH);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
 		  END;
 		ELSE BEGIN 
+			IF @TransactionDate IS NOT NULL SET @txDate = @TransactionDate;
 			SET @startTx = TRY_CAST(@StartTransactionID AS int);
 		END;
 
@@ -1397,14 +1404,17 @@ FOR JSON PATH);
 		DECLARE @translationSql nvarchar(MAX);
 
 		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
-		SELECT 
-			[table_name], 
-			[column_name], 
-			[key_table],
-			[key_column], 
-			[value_column]
+		SELECT DISTINCT
+			tk.[table_name], 
+			tk.[column_name], 
+			tk.[key_table],
+			tk.[key_column], 
+			tk.[value_column]
 		FROM 
-			dda.[translation_keys] 		
+			dda.[translation_keys] tk	
+			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+		WHERE 
+			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
 		
 		OPEN [translator];
 		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
