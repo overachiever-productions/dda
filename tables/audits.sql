@@ -23,3 +23,8 @@ END;
 IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID('dda.audits') AND [name] = N'operation' AND [max_length] = 9) BEGIN 
 	ALTER TABLE dda.[audits] ALTER COLUMN [operation] char(6) NOT NULL;
 END;
+
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.audits') AND [name] = N'PK_audits' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.audits.PK_audits', N'PK_dda_audits';
+END;
