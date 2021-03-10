@@ -74,6 +74,12 @@ IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.t
 
 END;
 
+-- v2.0 to v3.0 correction to PK column name and PK constraint name: 
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_key_id') BEGIN 
+	EXEC sp_rename N'dda.translation_values.PK_translation_keys', N'PK_dda_translation_values';
+	EXEC sp_rename N'dda.translation_values.translation_key_id', N'translation_value_id', N'COLUMN';
+END;
+
 DROP TRIGGER IF EXISTS [dda].[rules_for_values];
 GO
 

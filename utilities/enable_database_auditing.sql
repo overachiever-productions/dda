@@ -12,7 +12,8 @@ IF OBJECT_ID('dda.enable_database_auditing','P') IS NOT NULL
 GO
 
 CREATE PROC dda.[enable_database_auditing]
-	@ExcludedTables				nvarchar(MAX), 
+	@ExcludedTables				nvarchar(MAX)			= NULL, 
+	@ExcludedSchemas			nvarchar(MAX)			= NULL,			-- wildcards NOT allowed/supported.
 	@ExcludeTablesWithoutPKs	bigint					= 0,			-- Default behavior is to throw an error/warning - and stop. 
 	@TriggerNamePattern			sysname					= N'ddat_{0}', 
 	@ContinueOnError			bit						= 1,
@@ -23,6 +24,7 @@ AS
 	-- {copyright}
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
+	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
 	SET @TriggerNamePattern = ISNULL(NULLIF(@TriggerNamePattern, N''), N'ddat_{0}');
 	SET @ExcludeTablesWithoutPKs = ISNULL(@ExcludeTablesWithoutPKs, 0);
 	SET @ContinueOnError = ISNULL(@ContinueOnError, 1);
@@ -50,6 +52,23 @@ AS
 		SET 
 			[schema_name] = ISNULL(PARSENAME([table_name], 2), N'dbo'), 
 			[table_name] = PARSENAME([table_name], 1);
+	END;
+
+	DECLARE @schemasToExclude table ( 
+		row_id int IDENTITY(1,1) NOT NULL, 
+		[name] sysname NOT NULL 
+	);
+
+	IF @ExcludedSchemas IS NOT NULL BEGIN 
+		INSERT INTO @schemasToExclude (
+			[name]
+		)
+		SELECT 
+			[result] [name]
+		FROM 
+			dda.[split_string](@ExcludedSchemas, N',', 1)
+		ORDER BY 
+			[row_id];
 	END;
 
 	DECLARE @nonExcludedTablesWithoutPKs table (
@@ -175,6 +194,10 @@ AS
 		-- Exclude DDA tables:
 		(x.[schema_name] = N'dda' AND (x.[table_name] = N'trigger_host' OR x.[table_name] = N'audits'))
 		OR [exclusions].[id] IS NOT NULL;
+
+	DELETE FROM [#tablesToAudit]
+	WHERE 
+		[schema_name] IN (SELECT [name] FROM @schemasToExclude);
 
 	-- flag/remove tables already enabled for auditing:
 	WITH core AS (  -- NOTE: this is a DRY violation - from dda.list_dynamic_triggers
