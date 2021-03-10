@@ -181,6 +181,10 @@ IF OBJECT_ID('dda.translation_tables') IS NULL BEGIN
 
 END;
 
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.translation_tables') AND [name] = N'PK_translation_tables' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.translation_tables.PK_translation_tables', N'PK_dda_translation_tables';
+END;
 
 DROP TRIGGER IF EXISTS [dda].[rules_for_tables];
 GO
@@ -253,6 +257,12 @@ IF OBJECT_ID('dda.translation_columns') IS NULL BEGIN
 	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_columns_by_table_and_column_name ON dda.[translation_columns] ([table_name], [column_name]);
 
 END;
+
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.translation_columns') AND [name] = N'PK_translation_columns' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.translation_columns.PK_translation_columns', N'PK_dda_translation_columns';
+END;
+
 
 DROP TRIGGER IF EXISTS [dda].[rules_for_columns];
 GO
@@ -396,6 +406,19 @@ IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.t
 
 END;
 
+-- v2.0 to v3.0 correction to PK column name and PK constraint name: 
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_key_id') BEGIN 
+	EXEC sp_rename N'dda.translation_values.PK_translation_keys', N'PK_dda_translation_values';
+	EXEC sp_rename N'dda.translation_values.translation_key_id', N'translation_value_id', N'COLUMN';
+END;
+
+-- v2.0 to v3.0 removal of 'types' column: 
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_value_type') BEGIN
+	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP CONSTRAINT [DF_translation_values_translation_value_type]';
+	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP COLUMN [translation_value_type];';
+END;
+
+
 DROP TRIGGER IF EXISTS [dda].[rules_for_values];
 GO
 
@@ -461,6 +484,129 @@ GO
 
 
 -----------------------------------
+IF OBJECT_ID('dda.translation_keys') IS NULL BEGIN 
+	
+	CREATE TABLE dda.translation_keys (
+		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
+		[table_name] sysname NOT NULL, 
+		[column_name] sysname NOT NULL, 
+		[key_table] sysname NOT NULL, 
+		[key_column] sysname NOT NULL, 
+		[value_column] sysname NOT NULL, 
+		[notes] nvarchar(MAX) NULL,
+		CONSTRAINT PK_translation_keys PRIMARY KEY CLUSTERED ([translation_key_id])
+	);
+
+END;
+
+DROP TRIGGER IF EXISTS [dda].[rules_for_keys];
+GO
+
+CREATE TRIGGER [dda].[rules_for_keys] ON [dda].[translation_keys] FOR INSERT, UPDATE
+AS 
+
+	-- NOTE: 
+	--		Triggers are UGLY. Using them HERE makes sense given how infrequently they'll be executed. 
+	--		In other words, do NOT take use of triggers here as an indication that using triggers to
+	--			enforce business rules or logic in YOUR databases is any kind of best practice, as it
+	--			almost certainly is NOT a best practice (for anything other than light-weight auditing).
+
+	-- verify that table is in correct format: <schema>.<table>. 
+	DECLARE @tableName sysname, @columnName sysname, @keyTable sysname;
+	SELECT 
+		@tableName = [table_name], 
+		@columnName = [column_name], 
+		@keyTable = [key_table]
+	FROM [Inserted];
+
+	-- Check Naming of @tableName:
+	DECLARE @dbNamePart sysname, @schemaNamePart sysname, @tableNamePart sysname;
+	SELECT 
+		@dbNamePart = PARSENAME(@tableName, 3),
+		@schemaNamePart = PARSENAME(@tableName, 2), 
+		@tableNamePart = PARSENAME(@tableName, 1);
+
+	IF @dbNamePart IS NOT NULL BEGIN 
+		RAISERROR(N'The [table_name] column MUST be specified in <schema_name>.<db_name> format. Database-name is not supported.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF @tableNamePart IS NULL BEGIN 
+		RAISERROR('The [table_name] column MUST be specified in <schema_name>.<db_name> format.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF @schemaNamePart IS NULL BEGIN 
+		-- check to see if dbo.<tableName> and suggest it if it does. either way, rollback/error. 
+		IF EXISTS (SELECT NULL FROM sys.objects WHERE [schema_id] = 1 AND [name] = @tableNamePart) BEGIN 
+			RAISERROR('Please specify a valid schema for table [%s] - i.e, ''[dbo].[%s]'' instead of just ''%s''.', 16, 1, @tableNamePart, @tableNamePart, @tableNamePart);
+			ROLLBACK;
+			GOTO Finalize;
+		END;
+
+		RAISERROR('The [table_name] column MUST be specified in <schema_name>.<db_name> format.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF NOT EXISTS (SELECT NULL FROM sys.objects WHERE [schema_id] = SCHEMA_ID(@schemaNamePart) AND [name] = @tableNamePart) BEGIN 
+		PRINT N'WARNING: table [' + @schemaNamePart + N'].[' + @tableNamePart + N'] does NOT exist.';
+		PRINT N' Mapping will still be added but won''t work until a matching table exists and is enabled for auditing.)';
+	END;
+
+	IF NOT EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(@tableName) AND [name] = @columnName) BEGIN 
+		PRINT N'WARNING: column [' + @columnName + N'] does NOT exist in the specified table.';
+		PRINT N' Mapping will still be created, but will not work until a table-name+column-name match exists and is audited.';
+	END;
+
+	-- Check Naming of @keyTable:
+	SELECT 
+		@dbNamePart = PARSENAME(@keyTable, 3),
+		@schemaNamePart = PARSENAME(@keyTable, 2), 
+		@tableNamePart = PARSENAME(@keyTable, 1);
+
+	IF @dbNamePart IS NOT NULL BEGIN 
+		RAISERROR(N'The [key_table] column MUST be specified in <schema_name>.<db_name> format. Database-name is not supported.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF @tableNamePart IS NULL BEGIN 
+		RAISERROR('The [key_table] column MUST be specified in <schema_name>.<db_name> format.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF @schemaNamePart IS NULL BEGIN 
+		-- check to see if dbo.<tableName> and suggest it if it does. either way, rollback/error. 
+		IF EXISTS (SELECT NULL FROM sys.objects WHERE [schema_id] = 1 AND [name] = @tableNamePart) BEGIN 
+			RAISERROR('Please specify a valid schema for table [%s] - i.e, ''[dbo].[%s]'' instead of just ''%s''.', 16, 1, @tableNamePart, @tableNamePart, @tableNamePart);
+			ROLLBACK;
+			GOTO Finalize;
+		END;
+
+		RAISERROR('The [key_table] column MUST be specified in <schema_name>.<db_name> format.', 16, 1);
+		ROLLBACK;
+		GOTO Finalize;
+	END;
+
+	IF NOT EXISTS (SELECT NULL FROM sys.objects WHERE [schema_id] = SCHEMA_ID(@schemaNamePart) AND [name] = @tableNamePart) BEGIN 
+		PRINT N'WARNING: table [' + @schemaNamePart + N'].[' + @tableNamePart + N'] does NOT exist.';
+		PRINT N' Mapping will still be added but won''t work until a matching table exists and is enabled for auditing.)';
+	END;
+
+	IF NOT EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(@tableName) AND [name] = @columnName) BEGIN 
+		PRINT N'WARNING: column [' + @columnName + N'] does NOT exist in the specified table.';
+		PRINT N' Mapping will still be created, but will not work until a table-name+column-name match exists and is audited.';
+	END;
+
+Finalize:
+GO
+
+
+-----------------------------------
 IF OBJECT_ID('dda.trigger_host') IS NULL BEGIN
 
 	CREATE TABLE dda.trigger_host (
@@ -487,6 +633,11 @@ IF OBJECT_ID('dda.surrogate_keys', 'U') IS NULL BEGIN
 
 END;
 
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.surrogate_keys') AND [name] = N'PK_surrogate_keys' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.surrogate_keys.PK_surrogate_keys', N'PK_dda_surrogate_keys';
+END;
+
 
 -----------------------------------
 IF OBJECT_ID(N'dda.secondary_keys', N'U') IS NULL BEGIN 
@@ -501,6 +652,11 @@ IF OBJECT_ID(N'dda.secondary_keys', N'U') IS NULL BEGIN
 		CONSTRAINT PK_secondary_keys PRIMARY KEY CLUSTERED ([schema], [table])
 	);
 
+END;
+
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.secondary_keys') AND [name] = N'PK_secondary_keys' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.secondary_keys.PK_secondary_keys', N'PK_dda_secondary_keys';
 END;
 
 
@@ -529,6 +685,11 @@ END;
 
 IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID('dda.audits') AND [name] = N'operation' AND [max_length] = 9) BEGIN 
 	ALTER TABLE dda.[audits] ALTER COLUMN [operation] char(6) NOT NULL;
+END;
+
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.audits') AND [name] = N'PK_audits' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.audits.PK_audits', N'PK_dda_audits';
 END;
 
 
@@ -561,7 +722,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -596,7 +757,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -668,7 +829,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -737,7 +898,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -771,6 +932,101 @@ AS
 	END;
 
 	RETURN 0;
+GO
+
+
+-----------------------------------
+/*
+
+https://docs.microsoft.com/en-us/sql/t-sql/functions/openjson-transact-sql?view=sql-server-ver15#return-value
+Value of the Type column	JSON data type
+0	null
+1	string
+2	number
+3	true/false
+4	array
+5	object
+
+
+
+				SELECT dda.[get_json_data_type](NULL);
+				SELECT dda.[get_json_data_type]('true');
+				SELECT dda.[get_json_data_type](325);
+				SELECT dda.[get_json_data_type](325.00);
+				SELECT dda.[get_json_data_type](-325);
+				SELECT dda.[get_json_data_type](-325.99);
+				SELECT dda.[get_json_data_type]('-325.99');
+				SELECT dda.[get_json_data_type]('$325');
+				SELECT dda.[get_json_data_type]('string here');
+
+				SELECT dda.[get_json_data_type]('2020-10-20T13:48:39.567');
+				SELECT dda.[get_json_data_type]('C7A3ED8B-AFE1-41BB-8ED9-F3777DA7D996');     
+
+
+				SELECT dda.[get_json_data_type]('{
+				  "my key $1": {
+					"regularKey":{
+					  "key with . dot": 1
+					}
+				  }
+				}');
+
+
+				SELECT dda.[get_json_data_type](N'[
+				{
+				"OrderNumber":"SO43659",
+				"OrderDate":"2011-05-31T00:00:00",
+				"AccountNumber":"AW29825",
+				"ItemPrice":2024.9940,
+				"ItemQuantity":1
+				},
+				{
+				"OrderNumber":"SO43661",
+				"OrderDate":"2011-06-01T00:00:00",
+				"AccountNumber":"AW73565",
+				"ItemPrice":2024.9940,
+				"ItemQuantity":3
+				}
+				]');
+
+
+
+*/
+
+
+IF OBJECT_ID('dda.get_json_data_type','FN') IS NOT NULL
+	DROP FUNCTION dda.[get_json_data_type];
+GO
+
+CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
+RETURNS tinyint
+AS
+    
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+    
+    BEGIN; 
+
+		-- 0
+		IF @value IS NULL RETURN 0;
+		IF @value = N'null' RETURN 0;
+    	
+		-- 3
+    	IF @value IN ('true', 'false') RETURN 3;
+
+		-- 2
+		IF @value NOT LIKE '%[^0123456789.-]%' RETURN 2; 
+
+		-- 4 & 5
+    	IF ISJSON(@value) = 1 BEGIN 
+			IF LEFT(LTRIM(@value), 1) = N'[' RETURN 4; 
+
+			RETURN 5;
+		END;
+
+    	-- at this point, there's nothing left but string... 
+    	RETURN 1;
+    
+    END;
 GO
 
 
@@ -837,7 +1093,13 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+
+	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
+	IF @context = 0x999090000000000000009999 BEGIN -- set to a random/unique value at deployment
+		PRINT 'Dynamic Data Auditing Trigger bypassed.';
+		GOTO Cleanup; 
+	END;
 
 	DECLARE @tableName sysname, @schemaName sysname;
 	SELECT 
@@ -1071,7 +1333,7 @@ AS
 
 			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
 
-			EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			--EXEC [admindb].dbo.[print_long_string] @rotateSQL;
 			
 			EXEC sp_executesql 
 				@rotateSQL, 
@@ -1154,10 +1416,31 @@ GO
 
 			EXEC dda.[get_audit_data]
 				@TargetUsers = N'sa, bilbo',
-				@TargetTables = N'SortTable,Errors',
+				--@TargetTables = N'SortTable,Errors',
 				@TransformOutput = 1,
 				@FromIndex = 20,
 				@ToIndex = 40;
+
+
+		-- AuditID Specific Searches: 
+			EXEC dda.[get_audit_data]
+				@StartAuditID = 1017;
+
+			EXEC dda.[get_audit_data]
+				@StartAuditID = 1017, 
+				@EndAuditID = 1021;
+
+		-- TransactionID Specific Searches:
+			EXEC dda.[get_audit_data]
+				@StartTransactionID = '2021-039-017406316';
+
+
+			EXEC dda.[get_audit_data]
+				@StartTransactionID = '2021-039-017406316', 
+				@EndTransactionID = '2021-039-017633755';
+
+
+
 
 */
 
@@ -1170,18 +1453,25 @@ CREATE PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
-	@AuditID					int				= NULL,
+	@StartAuditID				int				= NULL,
+	@EndAuditID					int				= NULL,
+	@StartTransactionID			sysname			= NULL, 
+	@EndTransactionID			sysname			= NULL,
+	@TransactionDate			date			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
+
+	SET @StartTransactionID = NULLIF(@StartTransactionID, N'');
+	SET @EndTransactionID = NULLIF(@EndTransactionID, N'');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
 	SET @ToIndex = ISNULL(@ToIndex, 1);
@@ -1195,9 +1485,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -1219,8 +1509,7 @@ AS
 	WHERE 
 		{TimeFilters}
 		{Users}
-		{Tables}
-		{AuditID}
+		{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1237,6 +1526,7 @@ FOR JSON PATH);
 	DECLARE @users nvarchar(MAX) = N'';
 	DECLARE @tables nvarchar(MAX) = N'';
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
+	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -1287,14 +1577,65 @@ FOR JSON PATH);
 		IF @predicated = 1 SET @tables = N'AND ' + @tables;
 	END;
 	
-	IF @AuditID IS NOT NULL BEGIN 
-		SET @auditIdClause = N'[audit_id] = ' + CAST(@AuditID AS sysname);
+	IF @StartAuditID IS NOT NULL BEGIN 
+		IF @EndAuditID IS NULL BEGIN
+			SET @auditIdClause = N'[audit_id] = ' + CAST(@StartAuditID AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
+		END;
+	END;
+
+	IF @StartTransactionID IS NOT NULL BEGIN 
+		DECLARE @year int, @doy int;
+		DECLARE @txDate datetime; 
+		DECLARE @startTx int;
+		DECLARE @endTx int;
+		
+		IF @StartTransactionID LIKE N'%-%' BEGIN 
+			SELECT @year = LEFT(@StartTransactionID, 4);
+			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
+			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+
+			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
+			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
+		  END;
+		ELSE BEGIN 
+			IF @TransactionDate IS NOT NULL SET @txDate = @TransactionDate;
+			SET @startTx = TRY_CAST(@StartTransactionID AS int);
+		END;
+
+		IF @EndTransactionID IS NOT NULL BEGIN 
+			IF @EndTransactionID LIKE N'%-%' BEGIN 
+				SET @endTx = RIGHT(@EndTransactionID, 9);
+			  END; 
+			ELSE BEGIN 
+				SET @endTx = TRY_CAST(@EndTransactionID AS int);
+			END;
+
+			SET @transactionIdClause = N'([transaction_id] >= ' + CAST(@startTx AS sysname) + N' AND [transaction_id] <= ' + CAST(@endTx AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @transactionIdClause = N'([transaction_id] = ' + CAST(@startTx AS sysname);
+		END;
+
+		IF @startTx IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -80;
+		END;
+
+		IF @txDate IS NOT NULL BEGIN 
+			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
+		END;
+		
+		SET @transactionIdClause = @transactionIdClause + N')';
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Users}', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N'{Tables}', @tables);
 	SET @coreQuery = REPLACE(@coreQuery, N'{AuditID}', @auditIdClause);
+	SET @coreQuery = REPLACE(@coreQuery, N'{TransactionID}', @transactionIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -1322,6 +1663,9 @@ FOR JSON PATH);
 		[translated_multi_row] nvarchar(MAX) NULL
 	);
 
+	-- NOTE: INSERT + EXEC (dynamic-SQL with everything needed from dda.audits in a single 'gulp') would make more sense here. 
+	--		BUT, INSERT + EXEC causes dreaded "INSERT EXEC can't be nested..." error if/when UNIT tests are used to test this code. 
+	--			So, this 'hack' of grabbing JSON (dynamically), shredding it, and JOINing 'back' to dda.audits... exists below):
 	INSERT INTO [#raw_data] (
 		[x].[row_number],
 		[x].[total_rows],
@@ -1513,6 +1857,7 @@ FOR JSON PATH);
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
 	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
+-- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
 -- DDA-39: Bug/Busted:
 	--DELETE FROM [#key_value_pairs] 
 	--WHERE
@@ -1522,8 +1867,8 @@ FOR JSON PATH);
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value], 
-		x.[translated_value_type] = v.[translation_value_type]
+		x.[translated_value] = v.[translation_value]--, 
+		--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
 	FROM 
 		[#key_value_pairs] x
 		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
@@ -1534,8 +1879,8 @@ FOR JSON PATH);
 	-- Stage from/to value translations:
 	UPDATE x 
 	SET
-		x.[translated_from_value] = v.[translation_value], 
-		x.[translated_from_value_type] = v.[translation_value_type]
+		x.[translated_from_value] = v.[translation_value]--, 
+		--x.[translated_from_value_type] = CASE WHEN v.[translation_value] IS NULL THEN NULL ELSE dda.[get_json_data_type](v.[translation_value]) END
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -1545,8 +1890,8 @@ FOR JSON PATH);
 
 	UPDATE x 
 	SET
-		x.[translated_to_value] = v.[translation_value], 
-		x.[translated_to_value_type] = v.[translation_value_type]
+		x.[translated_to_value] = v.[translation_value]--, 
+		--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -1554,14 +1899,98 @@ FOR JSON PATH);
 	WHERE 
 		[to_value] IS NOT NULL; -- ditto... 
 
+	-- address translation_keys: 
+	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
+		
+		CREATE TABLE #translation_key_values (
+			row_id int IDENTITY(1,1) NOT NULL, 
+			source_table sysname NOT NULL, 
+			source_column sysname NOT NULL, 
+			translation_key nvarchar(MAX) NOT NULL, 
+			translation_value nvarchar(MAX) NOT NULL
+		);
+			
+		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
+		DECLARE @translationSql nvarchar(MAX);
+
+		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
+		SELECT DISTINCT
+			tk.[table_name], 
+			tk.[column_name], 
+			tk.[key_table],
+			tk.[key_column], 
+			tk.[value_column]
+		FROM 
+			dda.[translation_keys] tk	
+			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+		WHERE 
+			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
+				
+		OPEN [translator];
+		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		
+		WHILE @@FETCH_STATUS = 0 BEGIN
+		
+			SET @translationSql = N'INSERT INTO #translation_key_values ([source_table], [source_column], [translation_key], [translation_value]) 
+				SELECT @sourceTable [source_table], @sourceColumn [source_column], ' + QUOTENAME(@translationKey) + N' [translation_key], ' + QUOTENAME(@translationValue) + N' [translation_value] 
+				FROM 
+					' + @translationTable + N';'
+
+			EXEC sp_executesql 
+				@translationSql, 
+				N'@sourceTable sysname, @sourceColumn sysname', 
+				@sourceTable = @sourceTable, 
+				@sourceColumn = @sourceColumn;			
+
+			FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		END;
+		
+		CLOSE [translator];
+		DEALLOCATE [translator];
+
+		-- map INSERT/DELETE translations:
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value]--, 
+			--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+		-- map FROM / TO translations:
+		UPDATE x 
+		SET
+			x.[translated_from_value] = v.[translation_value]--,
+			--x.[translated_from_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+		UPDATE x 
+		SET
+			x.[translated_to_value] = v.[translation_value]--, 
+			--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[to_value] IS NOT NULL; -- ditto... 
+	END;
+
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
 		[translated_update_value] = N'{"from":' + CASE 
-				WHEN [translated_from_value_type] = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"' 
+				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
 				ELSE ISNULL([translated_from_value], [from_value])
 			END + N', "to":' + CASE 
-				WHEN [translated_to_value_type] = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
+				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
 	WHERE 
@@ -1597,6 +2026,7 @@ FOR JSON PATH);
 --				AND [translated_update_value] IS NULL 
 --				AND [kvp_type] = N'detail'
 --		);
+
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
@@ -1686,7 +2116,6 @@ FOR JSON PATH);
 			core
 	)
 
-
 	INSERT INTO [#translated_kvps] (
 		[sort_id],
 		[row_number],
@@ -1710,7 +2139,7 @@ FOR JSON PATH);
 		[value_type]
 	FROM 
 		[details];
-		
+
 	-- collapse multi-row results back down to a single 'set'/row of results:
 	IF EXISTS (SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN 
 
@@ -1724,7 +2153,7 @@ FOR JSON PATH);
 				x.[column], 
 				x.[value], 
 				x.[value_type], 
-				x.[sort_id]		-- not currently used, but will/should be
+				x.[sort_id]		
 			FROM 
 				[#translated_kvps] x
 				INNER JOIN [#raw_data] r ON [x].[row_number] = [r].[row_number]
@@ -1758,8 +2187,8 @@ FOR JSON PATH);
 							N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
 							N'"' + [k].[column] + N'":' + 
 							CASE 
-								WHEN [k].[value_type] = 2 THEN [k].[value]
-								ELSE N'"' + [k].[value] + N'"'
+								WHEN [k].[value_type] = 1 THEN N'"' + [k].[value] + N'"'
+								ELSE [k].[value]
 							END  
 						FROM 
 							[keys] [k]
@@ -1777,8 +2206,8 @@ FOR JSON PATH);
 							N',' + 
 							N'"' + [d].[column] + N'":' + 
 							CASE 
-								WHEN [d].[value_type] IN (2,5) THEN [d].[value]
-								ELSE N'"' + [d].[value] + N'"'
+								WHEN [d].[value_type] = 1 THEN N'"' + [d].[value] + N'"'
+								ELSE [d].[value]
 							END
 						FROM 
 							[details] [d] 
@@ -1848,8 +2277,8 @@ FOR JSON PATH);
 						N',' + 
 						N'"' + [x2].[column] + N'":' +
 						CASE 
-							WHEN [x2].[value_type] = 2 THEN [x2].[value] 
-							ELSE N'"' + [x2].[value] + N'"'
+							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
+							ELSE [x2].[value]
 						END 
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
@@ -1873,8 +2302,8 @@ FOR JSON PATH);
 						N',' + 
 						N'"' + [x2].[column] + N'":' +
 						CASE 
-							WHEN [x2].[value_type] IN (2, 5) THEN [x2].[value]   -- if it's a number or json/etc... just use the RAW value
-							ELSE N'"' + [x2].[value] + N'"'
+							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
+							ELSE [x2].[value]
 						END
 					FROM 
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
@@ -1929,18 +2358,25 @@ ALTER PROC dda.[get_audit_data]
 	@EndTime					datetime		= NULL, 
 	@TargetUsers				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
-	@AuditID					int				= NULL,
+	@StartAuditID				int				= NULL,
+	@EndAuditID					int				= NULL,
+	@StartTransactionID			sysname			= NULL, 
+	@EndTransactionID			sysname			= NULL,
+	@TransactionDate			date			= NULL,
 	@TransformOutput			bit				= 1,
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
+
+	SET @StartTransactionID = NULLIF(@StartTransactionID, N'''');
+	SET @EndTransactionID = NULLIF(@EndTransactionID, N'''');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
 	SET @ToIndex = ISNULL(@ToIndex, 1);
@@ -1954,9 +2390,9 @@ AS
 		RETURN - 10;
 	END;
 
-	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@AuditID IS NULL) BEGIN
+	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N''Queries against Audit data MUST be constrained - either specify a single @AuditID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.'', 16, 1);
+			RAISERROR(N''Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.'', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -1978,8 +2414,7 @@ AS
 	WHERE 
 		{TimeFilters}
 		{Users}
-		{Tables}
-		{AuditID}
+		{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1996,6 +2431,7 @@ FOR JSON PATH);
 	DECLARE @users nvarchar(MAX) = N'''';
 	DECLARE @tables nvarchar(MAX) = N'''';
 	DECLARE @auditIdClause nvarchar(MAX) = N'''';
+	DECLARE @transactionIdClause nvarchar(MAX) = N'''';
 	DECLARE @predicated bit = 0;
 
 	IF @StartTime IS NOT NULL BEGIN 
@@ -2045,15 +2481,66 @@ FOR JSON PATH);
 		
 		IF @predicated = 1 SET @tables = N''AND '' + @tables;
 	END;
+	
+	IF @StartAuditID IS NOT NULL BEGIN 
+		IF @EndAuditID IS NULL BEGIN
+			SET @auditIdClause = N''[audit_id] = '' + CAST(@StartAuditID AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @auditIdClause = N''[audit_id] >= '' + CAST(@StartAuditID AS sysname) + N'' AND [audit_id] <= ''  + CAST(@EndAuditID AS sysname)
+		END;
+	END;
 
-	IF @AuditID IS NOT NULL BEGIN 
-		SET @auditIdClause = N''[audit_id] = '' + CAST(@AuditID AS sysname);
+	IF @StartTransactionID IS NOT NULL BEGIN 
+		DECLARE @year int, @doy int;
+		DECLARE @txDate datetime; 
+		DECLARE @startTx int;
+		DECLARE @endTx int;
+		
+		IF @StartTransactionID LIKE N''%-%'' BEGIN 
+			SELECT @year = LEFT(@StartTransactionID, 4);
+			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
+			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+
+			SET @txDate = CAST(CAST(@year AS sysname) + N''-01-01'' AS datetime);
+			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
+		  END;
+		ELSE BEGIN 
+			IF @TransactionDate IS NOT NULL SET @txDate = @TransactionDate;
+			SET @startTx = TRY_CAST(@StartTransactionID AS int);
+		END;
+
+		IF @EndTransactionID IS NOT NULL BEGIN 
+			IF @EndTransactionID LIKE N''%-%'' BEGIN 
+				SET @endTx = RIGHT(@EndTransactionID, 9);
+			  END; 
+			ELSE BEGIN 
+				SET @endTx = TRY_CAST(@EndTransactionID AS int);
+			END;
+
+			SET @transactionIdClause = N''([transaction_id] >= '' + CAST(@startTx AS sysname) + N'' AND [transaction_id] <= '' + CAST(@endTx AS sysname);
+		  END;
+		ELSE BEGIN 
+			SET @transactionIdClause = N''([transaction_id] = '' + CAST(@startTx AS sysname);
+		END;
+
+		IF @startTx IS NULL BEGIN 
+			RAISERROR(N''Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.'', 16, 1);
+			RETURN -80;
+		END;
+
+		IF @txDate IS NOT NULL BEGIN 
+			SET @transactionIdClause = @transactionIdClause + N'' AND [timestamp] >= '''''' + CONVERT(sysname, @txDate, 121) + N'''''' AND [timestamp] < '''''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''''''';
+		END;
+		
+		SET @transactionIdClause = @transactionIdClause + N'')'';
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N''{TimeFilters}'', @timeFilters);
 	SET @coreQuery = REPLACE(@coreQuery, N''{Users}'', @users);
 	SET @coreQuery = REPLACE(@coreQuery, N''{Tables}'', @tables);
 	SET @coreQuery = REPLACE(@coreQuery, N''{AuditID}'', @auditIdClause);
+	SET @coreQuery = REPLACE(@coreQuery, N''{TransactionID}'', @transactionIdClause);
 	
 	DECLARE @coreJSON nvarchar(MAX);
 	EXEC sp_executesql 
@@ -2281,12 +2768,12 @@ FOR JSON PATH);
 	--WHERE
 	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
 
-	-- Stage Translations (start with columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
+	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value], 
-		x.[translated_value_type] = v.[translation_value_type]
+		x.[translated_value] = v.[translation_value]--, 
+		--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
 	FROM 
 		[#key_value_pairs] x
 		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
@@ -2297,8 +2784,8 @@ FOR JSON PATH);
 	-- Stage from/to value translations:
 	UPDATE x 
 	SET
-		x.[translated_from_value] = v.[translation_value], 
-		x.[translated_from_value_type] = v.[translation_value_type]
+		x.[translated_from_value] = v.[translation_value]--, 
+		--x.[translated_from_value_type] = CASE WHEN v.[translation_value] IS NULL THEN NULL ELSE dda.[get_json_data_type](v.[translation_value]) END
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -2308,8 +2795,8 @@ FOR JSON PATH);
 
 	UPDATE x 
 	SET
-		x.[translated_to_value] = v.[translation_value], 
-		x.[translated_to_value_type] = v.[translation_value_type]
+		x.[translated_to_value] = v.[translation_value]--, 
+		--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -2317,20 +2804,134 @@ FOR JSON PATH);
 	WHERE 
 		[to_value] IS NOT NULL; -- ditto... 
 
+	-- address translation_keys: 
+	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
+		
+		CREATE TABLE #translation_key_values (
+			row_id int IDENTITY(1,1) NOT NULL, 
+			source_table sysname NOT NULL, 
+			source_column sysname NOT NULL, 
+			translation_key nvarchar(MAX) NOT NULL, 
+			translation_value nvarchar(MAX) NOT NULL
+		);
+			
+		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
+		DECLARE @translationSql nvarchar(MAX);
+
+		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
+		SELECT DISTINCT
+			tk.[table_name], 
+			tk.[column_name], 
+			tk.[key_table],
+			tk.[key_column], 
+			tk.[value_column]
+		FROM 
+			dda.[translation_keys] tk	
+			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+		WHERE 
+			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
+				
+		OPEN [translator];
+		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		
+		WHILE @@FETCH_STATUS = 0 BEGIN
+		
+			SET @translationSql = N''INSERT INTO #translation_key_values ([source_table], [source_column], [translation_key], [translation_value]) 
+				SELECT @sourceTable [source_table], @sourceColumn [source_column], '' + QUOTENAME(@translationKey) + N'' [translation_key], '' + QUOTENAME(@translationValue) + N'' [translation_value] 
+				FROM 
+					'' + @translationTable + N'';''
+
+			EXEC sp_executesql 
+				@translationSql, 
+				N''@sourceTable sysname, @sourceColumn sysname'', 
+				@sourceTable = @sourceTable, 
+				@sourceColumn = @sourceColumn;			
+
+			FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
+		END;
+		
+		CLOSE [translator];
+		DEALLOCATE [translator];
+
+		-- map INSERT/DELETE translations:
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value]--, 
+			--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N''{"from":%"to":%'';
+
+		-- map FROM / TO translations:
+		UPDATE x 
+		SET
+			x.[translated_from_value] = v.[translation_value]--,
+			--x.[translated_from_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+		UPDATE x 
+		SET
+			x.[translated_to_value] = v.[translation_value]--, 
+			--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+		FROM 
+			[#key_value_pairs] x 
+			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
+		WHERE 
+			[to_value] IS NOT NULL; -- ditto... 
+	END;
+
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
 		[translated_update_value] = N''{"from":'' + CASE 
-				WHEN [translated_from_value_type] = 1 THEN N''"'' + ISNULL([translated_from_value], [from_value]) + N''"'' 
+				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N''"'' + ISNULL([translated_from_value], [from_value]) + N''"''
 				ELSE ISNULL([translated_from_value], [from_value])
 			END + N'', "to":'' + CASE 
-				WHEN [translated_to_value_type] = 1 THEN N''"'' + ISNULL([translated_to_value], [to_value]) + N''"''
+				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N''"'' + ISNULL([translated_to_value], [to_value]) + N''"''
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N''}''
 	WHERE 
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
+
+-- PERF / TODO:
+	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
+-- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
+-- TODO: test this against a ''wide'' table - I''ve only been testing narrow tables to this point... 
+-- ACTUALLY, these aren''t quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
+--	DELETE FROM [#key_value_pairs] 
+--	WHERE 
+--		[kvp_type] = N''key''
+--		AND [row_number] IN (
+--			SELECT [row_number] FROM [#key_value_pairs] 
+--			WHERE 
+--				[translated_column] IS NULL 
+--				AND [translated_value] IS NULL 
+--				AND [translated_update_value] IS NULL 
+--				AND [kvp_type] = N''key''
+--		);
+---- PERF: also, if I don''t ''pre-exclude'' these... then 2x passes here is crappy.
+--	DELETE FROM [#key_value_pairs] 
+--	WHERE 
+--		[kvp_type] = N''detail''
+--		AND [row_number] IN (
+--			SELECT [row_number] FROM [#key_value_pairs] 
+--			WHERE 
+--				[translated_column] IS NULL 
+--				AND [translated_value] IS NULL 
+--				AND [translated_update_value] IS NULL 
+--				AND [kvp_type] = N''detail''
+--		);
+
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
@@ -2419,7 +3020,7 @@ FOR JSON PATH);
 		FROM 
 			core
 	)
-	
+
 	INSERT INTO [#translated_kvps] (
 		[sort_id],
 		[row_number],
@@ -2443,10 +3044,9 @@ FOR JSON PATH);
 		[value_type]
 	FROM 
 		[details];
-		
+
 	-- collapse multi-row results back down to a single ''set''/row of results:
 	IF EXISTS (SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN 
-
 
 		WITH [flattened] AS ( 
 			SELECT 
@@ -2458,7 +3058,7 @@ FOR JSON PATH);
 				x.[column], 
 				x.[value], 
 				x.[value_type], 
-				x.[sort_id]		-- not currently used, but will/should be
+				x.[sort_id]		
 			FROM 
 				[#translated_kvps] x
 				INNER JOIN [#raw_data] r ON [x].[row_number] = [r].[row_number]
@@ -2491,8 +3091,8 @@ FOR JSON PATH);
 						STRING_AGG(
 							N''"'' + [k].[column] + N''":'' + 
 							CASE 
-								WHEN [k].[value_type] = 2 THEN [k].[value]
-								ELSE N''"'' + [k].[value] + N''"''
+								WHEN [k].[value_type] = 1 THEN N''"'' + [k].[value] + N''"''
+								ELSE [k].[value]
 							END + 
 							CASE 
 								WHEN [k].[current_kvp] = [k].[kvp_count] THEN N''''
@@ -2510,8 +3110,8 @@ FOR JSON PATH);
 						STRING_AGG(
 							N''"'' + [d].[column] + N''":'' + 
 							CASE 
-								WHEN [d].[value_type] IN (2,5) THEN [d].[value]
-								ELSE N''"'' + [d].[value] + N''"''
+								WHEN [d].[value_type] = 1 THEN N''"'' + [d].[value] + N''"''
+								ELSE [d].[value]
 							END + 
 							CASE 
 								WHEN [d].[current_kvp] = [d].[kvp_count] THEN N''''
@@ -2573,8 +3173,8 @@ FOR JSON PATH);
 					STRING_AGG(
 						N''"'' + [x2].[column] + N''":'' +
 						CASE 
-							WHEN [x2].[value_type] = 2 THEN [x2].[value] 
-							ELSE N''"'' + [x2].[value] + N''"''
+							WHEN [x2].[value_type] = 1 THEN N''"'' + [x2].[value] + N''"''
+							ELSE [x2].[value]
 						END + 
 						CASE 
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''''
@@ -2596,8 +3196,8 @@ FOR JSON PATH);
 					STRING_AGG(
 						N''"'' + [x2].[column] + N''":'' +
 						CASE 
-							WHEN [x2].[value_type] IN (2, 5) THEN [x2].[value]   -- if it''s a number or json/etc... just use the RAW value
-							ELSE N''"'' + [x2].[value] + N''"''
+							WHEN [x2].[value_type] = 1 THEN N''"'' + [x2].[value] + N''"''
+							ELSE [x2].[value]
 						END + 
 						CASE 
 							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''''
@@ -2664,7 +3264,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SELECT 
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(OBJECT_NAME(o.[object_id])) FROM sys.objects o WHERE o.[object_id] = t.[parent_id]) [parent_table],
@@ -2705,7 +3305,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -2849,7 +3449,8 @@ IF OBJECT_ID('dda.enable_database_auditing','P') IS NOT NULL
 GO
 
 CREATE PROC dda.[enable_database_auditing]
-	@ExcludedTables				nvarchar(MAX), 
+	@ExcludedTables				nvarchar(MAX)			= NULL, 
+	@ExcludedSchemas			nvarchar(MAX)			= NULL,			-- wildcards NOT allowed/supported.
 	@ExcludeTablesWithoutPKs	bigint					= 0,			-- Default behavior is to throw an error/warning - and stop. 
 	@TriggerNamePattern			sysname					= N'ddat_{0}', 
 	@ContinueOnError			bit						= 1,
@@ -2857,9 +3458,10 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
+	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
 	SET @TriggerNamePattern = ISNULL(NULLIF(@TriggerNamePattern, N''), N'ddat_{0}');
 	SET @ExcludeTablesWithoutPKs = ISNULL(@ExcludeTablesWithoutPKs, 0);
 	SET @ContinueOnError = ISNULL(@ContinueOnError, 1);
@@ -2887,6 +3489,23 @@ AS
 		SET 
 			[schema_name] = ISNULL(PARSENAME([table_name], 2), N'dbo'), 
 			[table_name] = PARSENAME([table_name], 1);
+	END;
+
+	DECLARE @schemasToExclude table ( 
+		row_id int IDENTITY(1,1) NOT NULL, 
+		[name] sysname NOT NULL 
+	);
+
+	IF @ExcludedSchemas IS NOT NULL BEGIN 
+		INSERT INTO @schemasToExclude (
+			[name]
+		)
+		SELECT 
+			[result] [name]
+		FROM 
+			dda.[split_string](@ExcludedSchemas, N',', 1)
+		ORDER BY 
+			[row_id];
 	END;
 
 	DECLARE @nonExcludedTablesWithoutPKs table (
@@ -3012,6 +3631,10 @@ AS
 		-- Exclude DDA tables:
 		(x.[schema_name] = N'dda' AND (x.[table_name] = N'trigger_host' OR x.[table_name] = N'audits'))
 		OR [exclusions].[id] IS NOT NULL;
+
+	DELETE FROM [#tablesToAudit]
+	WHERE 
+		[schema_name] IN (SELECT [name] FROM @schemasToExclude);
 
 	-- flag/remove tables already enabled for auditing:
 	WITH core AS (  -- NOTE: this is a DRY violation - from dda.list_dynamic_triggers
@@ -3255,7 +3878,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v2.0.3547.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -3274,7 +3897,6 @@ AS
 	DECLARE @bodyStart int = PATINDEX(@pattern, @definition);
 
 	DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, @bodyStart, LEN(@definition) - @bodyStart);
-
 
 	IF @PrintOnly = 1 BEGIN 
 		PRINT N'/* ------------------------------------------------------------------------------------------------------------------';
@@ -3493,11 +4115,22 @@ AS
 GO
 
 
+
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
+-- 5. Randomize bypass trigger 'key' for every environment/deployment:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'2.0.3547.2';
-DECLARE @VersionDescription nvarchar(200) = N'Minor Bug-Fixes + Multi-Row Key-Change Capture Improvements.';
+DECLARE @definition nvarchar(MAX);
+SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
+DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition), LEN(@definition) - PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition));
+SET @body = N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template] ON [dda].[trigger_host] '  + REPLACE(@body, N'0x999090000000000000009999', CONVERT(sysname, CAST(NEWID() AS varbinary(128)), 1));
+
+EXEC sp_executesql @body;
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- 6. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+DECLARE @CurrentVersion varchar(20) = N'3.0.3555.1';
+DECLARE @VersionDescription nvarchar(200) = N'Translations via Foreign Key Mappings + JSON formatting fixes + search improvements.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
@@ -3517,7 +4150,7 @@ SELECT * FROM dda.version_history;
 GO
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 6. Notify of need to run dda.update_trigger_definitions if/as needed:
+-- 7. Notify of need to run dda.update_trigger_definitions if/as needed:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true' AND OBJECT_NAME(t.[object_id]) <> N'dynamic_data_auditing_trigger_template') BEGIN 
 	SELECT N'Deployed DDA Triggers Detected' [scan_outcome], N'Please execute dda.update_trigger_definitions.' [recommendation], N'NOTE: Set @PrintOnly = 0 on dda.update_trigger_definitions to MAKE changes. By default, it only shows WHICH changes it WOULD make.' [notes];
