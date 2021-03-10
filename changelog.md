@@ -1,5 +1,29 @@
 # Change Log
 
+## [3.0] - 2021-03-09
+Translations via Foreign Key Mappings + JSON formatting fixes + search improvements.
+
+## Known-Issues: :zap:
+- `dda.get_audit_data` with `@TransformOutput = 1` on SQL Server 2016 instances with `MUTATE`/`"dump"` captures breaks JSON output/formatting (returns an 'empty array' - e.g., `[]`). This will be fixed with an intermediate release - v3.2 in a few days. 
+
+## Added
+- `dda.translation_keys` - new table that allows 'mapping' of Foreign Keys for transformation/translation of JSON output via `dda.get_audit_data`. For example, if you have a table called `dbo.user_preferences` with a column called `alerting_preference` that points to a 'lookup' table called, say, `dbo.alerting_options` with an `alerting_option_id` (1, 2, 3, 4, and so on) and corresponding values of, say, 'email', 'sms', 'push', 'none', etc... then while audits will capture a change from, say, `1` to `3` against `dbo.user_preferences.alerting_preference` when a user switches their preference from email to push... but that won't help a ton if/when looking at audit-data later on - unless you've got 'carnal' knowledge of what a 1 or 3 is, etc. With `dda.translation_keys` you can now instruct `dda.get_audit_data` to use a logical foreign key (it can be explicit or implied) by specifying that `table_name = 'dbo.user_preferences'` and `column_name = 'alerting_preference'` 'points' to `key_table = 'dbo.alerting_options'` with a 'key' (lookup) column of `key_column = 'alerting_preference_id'` with display/output values from `'value_column = 'preference_name'` - at which point translations will be handled just as expected from a FK lookup-table.
+
+- Ability to BYPASS Triggers for maintenance purposes. Installation/Updates of `dda_latest.sql` will create a unique (`NEWID()`) value that if/when found in `CONTEXT_INFO()` of any operations hitting/touching audited tables, will cause a short-circuit of trigger logic and BYPASS normal trigger/audit processing. 
+To see what the 'key' is for your database (this 'key' will be different per each instance/deployment of DDA), 'modify' an existing DDA trigger on one of your target tables and look for the code that says `IF @context = 0x000ValuesHere000##`. Then, if for example, your 'key' or `@context` value was, say, `0x910E7779ECEC9D4585055F2BF1091F51` you could run the following code: 
+
+```sql 
+
+SET CONTEXT_INFO 0x910E7779ECEC9D4585055F2BF1091F51;
+
+```
+and then if/when you make subsequent changes within the currently loaded/configured session (i.e., disconnect or explicitly change your CONTEXT_INFO() and this 'bypass ability' will obviously 'go away'), you won't 'trigger' audit captures or other processing/logic against any DDA audited tables. (Helpful for if/when you need to push, say, a software update/patch that changes a table with 10K columns from allowing NULLs for column xyz to a new default value of `'some value here'` - because, otherwise, your options are to either a. kick out all users/apps and quiesce the database or b. run the risk that while you run this UPDATE someone 'sneaks' in a 'legit' change while the DDA trigger has been temporarily disabled for your 10K row 'update'.)
+
+- `dda.get_audit_data` can now be queried by either a single `AuditID` value, a RANGE of `@StartAuditID` to `@EndAuditID` values or by similar options for `@StartTransactionID` through `@EndTransactionID`. In either case, IF you only specify the `@StartXXXXID` with no `@EndXXXID`, then only a single ID will be fetched (if it exists). Likewise, for TransactionID lookups, you can specify actual `int` values directly from the `dda.audits.transaction_id` table (along with an optional `@TransactionDate` parameter to avoid duplicates) OR you can use 'formatted' TransactionIDs as returned from `dda.get_audit_data` in the form of `yyyy-doy-#####` (where doy = day of year, and ### represents the integer transaction_id).
+
+## Fixed 
+- Known issue from versions 1 and 2 with translations of JSON data (from say, a literal value of `2` to `"email"`) no longer runs the risk of breaking JSON output when `@TransformOutput = 1` from `dda.get_audit_data` - i.e., data-types for translated/non-translated data are correctly handled.
+
 ## [2.0] - 2021-03-01 
 Minor Bug-Fixes + Multi-Row Key-Change Capture Improvements.
 
