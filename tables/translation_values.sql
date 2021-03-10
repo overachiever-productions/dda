@@ -80,6 +80,13 @@ IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.tran
 	EXEC sp_rename N'dda.translation_values.translation_key_id', N'translation_value_id', N'COLUMN';
 END;
 
+-- v2.0 to v3.0 removal of 'types' column: 
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_value_type') BEGIN
+	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP CONSTRAINT [DF_translation_values_translation_value_type]';
+	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP COLUMN [translation_value_type];';
+END;
+
+
 DROP TRIGGER IF EXISTS [dda].[rules_for_values];
 GO
 
