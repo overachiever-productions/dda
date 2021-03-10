@@ -57,6 +57,12 @@ AS
 
 	-- {copyright}
 
+	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
+	IF @context = 0x999090000000000000009999 BEGIN -- set to a random/unique value at deployment
+		PRINT 'Dynamic Data Auditing Trigger bypassed.';
+		GOTO Cleanup; 
+	END;
+
 	DECLARE @tableName sysname, @schemaName sysname;
 	SELECT 
 		@schemaName = SCHEMA_NAME([schema_id]),
@@ -289,7 +295,7 @@ AS
 
 			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
 
-			EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			--EXEC [admindb].dbo.[print_long_string] @rotateSQL;
 			
 			EXEC sp_executesql 
 				@rotateSQL, 

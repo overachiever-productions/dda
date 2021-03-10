@@ -26,7 +26,6 @@ AS
 
 	DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, @bodyStart, LEN(@definition) - @bodyStart);
 
-
 	IF @PrintOnly = 1 BEGIN 
 		PRINT N'/* ------------------------------------------------------------------------------------------------------------------';
 		PRINT N'';

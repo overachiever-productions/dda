@@ -12,6 +12,10 @@ IF OBJECT_ID('dda.translation_tables') IS NULL BEGIN
 
 END;
 
+-- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
+IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.translation_tables') AND [name] = N'PK_translation_tables' AND [is_primary_key] = 1) BEGIN
+	EXEC sp_rename N'dda.translation_tables.PK_translation_tables', N'PK_dda_translation_tables';
+END;
 
 DROP TRIGGER IF EXISTS [dda].[rules_for_tables];
 GO
