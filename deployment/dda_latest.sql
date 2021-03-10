@@ -348,63 +348,63 @@ IF OBJECT_ID('dda.translation_values') IS NULL BEGIN
 END;
 
 -- v0.9 to v1.0 Upgrade: 
-IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.translation_values') AND [name] = N'translation_value_type') BEGIN 
+--IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.translation_values') AND [name] = N'translation_value_type') BEGIN 
 
-	CREATE TABLE dda.translation_values2 (
-		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
-		[table_name] sysname NOT NULL, 
-		[column_name] sysname NOT NULL, 
-		[key_value] sysname NOT NULL, 
-		[translation_value] sysname NOT NULL,
-		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
-		[notes] nvarchar(MAX) NULL,
-		CONSTRAINT PK_translation_keys2 PRIMARY KEY NONCLUSTERED ([translation_key_id])
-	);
+--	CREATE TABLE dda.translation_values2 (
+--		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
+--		[table_name] sysname NOT NULL, 
+--		[column_name] sysname NOT NULL, 
+--		[key_value] sysname NOT NULL, 
+--		[translation_value] sysname NOT NULL,
+--		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
+--		[notes] nvarchar(MAX) NULL,
+--		CONSTRAINT PK_translation_keys2 PRIMARY KEY NONCLUSTERED ([translation_key_id])
+--	);
 
-	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values2_by_identifiers ON dda.[translation_values2] ([table_name], [column_name], [key_value]);
+--	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values2_by_identifiers ON dda.[translation_values2] ([table_name], [column_name], [key_value]);
 
-	BEGIN TRY
-		BEGIN TRAN; 
+--	BEGIN TRY
+--		BEGIN TRAN; 
 		
-			SET IDENTITY_INSERT dda.[translation_values2] ON;
+--			SET IDENTITY_INSERT dda.[translation_values2] ON;
 
-			INSERT INTO [dda].[translation_values2] (
-				[translation_key_id],
-				[table_name],
-				[column_name],
-				[key_value],
-				[translation_value],
-				[translation_value_type],
-				[notes]
-			)
-			SELECT 
-				[translation_key_id],
-				[table_name],
-				[column_name],
-				[key_value],
-				[translation_value],
-				1 [translation_value_type], -- default to 1 (string)
-				[notes] 
-			FROM 
-				dda.[translation_values];
+--			INSERT INTO [dda].[translation_values2] (
+--				[translation_key_id],
+--				[table_name],
+--				[column_name],
+--				[key_value],
+--				[translation_value],
+--				[translation_value_type],
+--				[notes]
+--			)
+--			SELECT 
+--				[translation_key_id],
+--				[table_name],
+--				[column_name],
+--				[key_value],
+--				[translation_value],
+--				1 [translation_value_type], -- default to 1 (string)
+--				[notes] 
+--			FROM 
+--				dda.[translation_values];
 
-			SET IDENTITY_INSERT dda.[translation_values2] OFF;
+--			SET IDENTITY_INSERT dda.[translation_values2] OFF;
 
-			DROP TABLE dda.[translation_values]; 
+--			DROP TABLE dda.[translation_values]; 
 
-			EXEC sp_rename N'dda.translation_values2.CLIX_translation_values2_by_identifiers', N'CLIX_translation_values_by_identifiers', N'INDEX';
+--			EXEC sp_rename N'dda.translation_values2.CLIX_translation_values2_by_identifiers', N'CLIX_translation_values_by_identifiers', N'INDEX';
 
-			EXEC sp_rename N'dda.translation_values2', N'translation_values'; -- table will STAY in the dda schema
-			EXEC sp_rename N'dda.PK_translation_keys2', N'PK_translation_keys';
+--			EXEC sp_rename N'dda.translation_values2', N'translation_values'; -- table will STAY in the dda schema
+--			EXEC sp_rename N'dda.PK_translation_keys2', N'PK_translation_keys';
 
-		COMMIT;
-	END TRY
-	BEGIN CATCH
-		SELECT N'WARNING!!!!!' [Deployment Error], N'Failured attempt to add translation_value_type to dda.translation_values' [Context], ERROR_NUMBER() [Error_Number], ERROR_MESSAGE() [Error_Message];
-		ROLLBACK;
-	END CATCH;
+--		COMMIT;
+--	END TRY
+--	BEGIN CATCH
+--		SELECT N'WARNING!!!!!' [Deployment Error], N'Failured attempt to add translation_value_type to dda.translation_values' [Context], ERROR_NUMBER() [Error_Number], ERROR_MESSAGE() [Error_Message];
+--		ROLLBACK;
+--	END CATCH;
 
-END;
+--END;
 
 -- v2.0 to v3.0 correction to PK column name and PK constraint name: 
 IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_key_id') BEGIN 
@@ -722,7 +722,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -757,7 +757,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -829,7 +829,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -898,7 +898,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -1002,7 +1002,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1093,7 +1093,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN -- set to a random/unique value at deployment
@@ -1464,7 +1464,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -2369,7 +2369,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -3264,7 +3264,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SELECT 
 		(SELECT QUOTENAME(SCHEMA_NAME(o.[schema_id])) + N'.' + QUOTENAME(OBJECT_NAME(o.[object_id])) FROM sys.objects o WHERE o.[object_id] = t.[parent_id]) [parent_table],
@@ -3305,7 +3305,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3458,7 +3458,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3878,7 +3878,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v3.0.3555.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v3.0.3555.2] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4129,7 +4129,7 @@ EXEC sp_executesql @body;
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 6. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'3.0.3555.1';
+DECLARE @CurrentVersion varchar(20) = N'3.0.3555.2';
 DECLARE @VersionDescription nvarchar(200) = N'Translations via Foreign Key Mappings + JSON formatting fixes + search improvements.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
