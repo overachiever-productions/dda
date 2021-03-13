@@ -1,9 +1,6 @@
 USE [dda_test]
 GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+
 ALTER PROCEDURE [transformations].[test ensure_translation_output]
 AS
 BEGIN
@@ -90,30 +87,26 @@ BEGIN
 		[table_name],
 		[column_name],
 		[key_value],
-		[translation_value],
-		[translation_value_type]
+		[translation_value]
 	)
 	VALUES	
 	(
 		N'dbo.SortTablE',
 		N'ColCHaR',
 		N'0x999',
-		N'TRANSLATED:1000',
-		1
+		N'TRANSLATED:1000'
 	),
 	(
 		N'dbo.SortTable',
 		N'ColChar',
 		N'xxx20FDCD2B-3321-48EA-81D6-094E658',
-		N'Factorio',
-		1
+		N'Factorio'
 	),
 	(
 		N'dbo.SortTable',
 		N'Value',
 		N'1995.81',
-		N'FREE!!!',			-- this, currently, creates a bug/problem with the JSON (but having it HERE - in this test - is by design/on-purpose)
-		2
+		N'FREE!!!'			-- this, currently, creates a bug/problem with the JSON (but having it HERE - in this test - is by design/on-purpose)
 	);
 
 	DROP TABLE IF EXISTS #search_output;

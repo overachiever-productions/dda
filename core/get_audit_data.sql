@@ -312,13 +312,10 @@ FOR JSON PATH);
 		[value] nvarchar(MAX) NULL, 
 		[value_type] int NOT  NULL,
 		[translated_value] sysname NULL, 
-		[translated_value_type] int NULL,
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
-		[translated_from_value_type] int NULL,
 		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
-		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
 	);
 
@@ -462,8 +459,7 @@ FOR JSON PATH);
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]--, 
-		--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+		x.[translated_value] = v.[translation_value]
 	FROM 
 		[#key_value_pairs] x
 		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
@@ -474,8 +470,7 @@ FOR JSON PATH);
 	-- Stage from/to value translations:
 	UPDATE x 
 	SET
-		x.[translated_from_value] = v.[translation_value]--, 
-		--x.[translated_from_value_type] = CASE WHEN v.[translation_value] IS NULL THEN NULL ELSE dda.[get_json_data_type](v.[translation_value]) END
+		x.[translated_from_value] = v.[translation_value]
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -485,8 +480,7 @@ FOR JSON PATH);
 
 	UPDATE x 
 	SET
-		x.[translated_to_value] = v.[translation_value]--, 
-		--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+		x.[translated_to_value] = v.[translation_value] 
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -546,8 +540,7 @@ FOR JSON PATH);
 		-- map INSERT/DELETE translations:
 		UPDATE x 
 		SET 
-			x.[translated_value] = v.[translation_value]--, 
-			--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -557,8 +550,7 @@ FOR JSON PATH);
 		-- map FROM / TO translations:
 		UPDATE x 
 		SET
-			x.[translated_from_value] = v.[translation_value]--,
-			--x.[translated_from_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_from_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -568,8 +560,7 @@ FOR JSON PATH);
 
 		UPDATE x 
 		SET
-			x.[translated_to_value] = v.[translation_value]--, 
-			--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_to_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -635,10 +626,7 @@ FOR JSON PATH);
 				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
 				ELSE ISNULL([translated_value], [value])
 			END [value], 
-			CASE 
-				WHEN [value_type] = 5 THEN 5 
-				ELSE ISNULL([translated_value_type], [value_type]) 
-			END [value_type]
+			[value_type]
 		FROM 
 			[#key_value_pairs]
 		WHERE 
@@ -686,10 +674,7 @@ FOR JSON PATH);
 				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
 				ELSE ISNULL([translated_value], [value])
 			END [value], 
-			CASE 
-				WHEN [value_type] = 5 THEN 5 
-				ELSE ISNULL([translated_value_type], [value_type]) 
-			END [value_type]
+			[value_type]
 		FROM 
 			[#key_value_pairs]
 		WHERE 
@@ -776,7 +761,7 @@ FOR JSON PATH);
 			SELECT 
 				x.[row_number], 
 				f.[json_row_id], 
-				COALESCE(STUFF(
+				NULLIF(COALESCE(STUFF(
 					(
 						SELECT 
 							N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
@@ -794,8 +779,8 @@ FOR JSON PATH);
 							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') [key_data],
-				COALESCE(STUFF(
+				, 1, 1, N''), N''), N'') [key_data],
+				NULLIF(COALESCE(STUFF(
 					(
 						SELECT
 							N',' + 
@@ -813,7 +798,7 @@ FOR JSON PATH);
 							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') [detail_data]
+				, 1, 1, N''), N''), N'') [detail_data]
 			FROM 
 				[#raw_data] [x]
 				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
@@ -823,7 +808,7 @@ FOR JSON PATH);
 		[serialized] AS ( 
 			SELECT 
 				[x].[row_number], 
-				N'[' + COALESCE(STUFF(
+				N'[' + NULLIF(COALESCE(STUFF(
 					(
 						SELECT 
 							N',' + 
@@ -834,7 +819,7 @@ FOR JSON PATH);
 							[c].[json_row_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') + N']' [serialized]
+				, 1, 1, N''), N''), N'') + N']' [serialized]
 
 			FROM 
 				[#raw_data] [x] 
@@ -866,7 +851,7 @@ FOR JSON PATH);
 	[keys] AS ( 
 		SELECT 
 			[x].[row_number], 
-			COALESCE(STUFF(
+			NULLIF(COALESCE(STUFF(
 				(
 					SELECT 
 						N',' + 
@@ -882,7 +867,7 @@ FOR JSON PATH);
 					FOR XML PATH('')
 					
 				)
-			, 1, 1, N''), N'') [key_data]
+			, 1, 1, N''), N''), N'') [key_data]
 
 		FROM 
 			[row_numbers] x
@@ -891,7 +876,7 @@ FOR JSON PATH);
 	[details] AS (
 		SELECT 
 			[x].[row_number], 
-			COALESCE(STUFF(
+			NULLIF(COALESCE(STUFF(
 				(
 					SELECT 
 						N',' + 
@@ -906,7 +891,7 @@ FOR JSON PATH);
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 				)
-			, 1, 1, N''), N'') [detail_data]
+			, 1, 1, N''), N''), N'') [detail_data]
 		FROM 
 			[row_numbers] x
 	)
@@ -1217,13 +1202,10 @@ FOR JSON PATH);
 		[value] nvarchar(MAX) NULL, 
 		[value_type] int NOT  NULL,
 		[translated_value] sysname NULL, 
-		[translated_value_type] int NULL,
 		[from_value] nvarchar(MAX) NULL, 
 		[translated_from_value] sysname NULL, 
-		[translated_from_value_type] int NULL,
 		[to_value] nvarchar(MAX) NULL, 
 		[translated_to_value] sysname NULL, 
-		[translated_to_value_type] int NULL,
 		[translated_update_value] nvarchar(MAX) NULL
 	);
 
@@ -1367,8 +1349,7 @@ FOR JSON PATH);
 	UPDATE x 
 	SET 
 		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]--, 
-		--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+		x.[translated_value] = v.[translation_value]
 	FROM 
 		[#key_value_pairs] x
 		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
@@ -1379,8 +1360,7 @@ FOR JSON PATH);
 	-- Stage from/to value translations:
 	UPDATE x 
 	SET
-		x.[translated_from_value] = v.[translation_value]--, 
-		--x.[translated_from_value_type] = CASE WHEN v.[translation_value] IS NULL THEN NULL ELSE dda.[get_json_data_type](v.[translation_value]) END
+		x.[translated_from_value] = v.[translation_value]
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -1390,8 +1370,7 @@ FOR JSON PATH);
 
 	UPDATE x 
 	SET
-		x.[translated_to_value] = v.[translation_value]--, 
-		--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+		x.[translated_to_value] = v.[translation_value]
 	FROM 
 		[#key_value_pairs] x 
 		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
@@ -1451,8 +1430,7 @@ FOR JSON PATH);
 		-- map INSERT/DELETE translations:
 		UPDATE x 
 		SET 
-			x.[translated_value] = v.[translation_value]--, 
-			--x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -1462,8 +1440,7 @@ FOR JSON PATH);
 		-- map FROM / TO translations:
 		UPDATE x 
 		SET
-			x.[translated_from_value] = v.[translation_value]--,
-			--x.[translated_from_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_from_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -1473,8 +1450,7 @@ FOR JSON PATH);
 
 		UPDATE x 
 		SET
-			x.[translated_to_value] = v.[translation_value]--, 
-			--x.[translated_to_value_type] = dda.[get_json_data_type](v.[translation_value])
+			x.[translated_to_value] = v.[translation_value]
 		FROM 
 			[#key_value_pairs] x 
 			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
@@ -1540,10 +1516,7 @@ FOR JSON PATH);
 				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
 				ELSE ISNULL([translated_value], [value])
 			END [value], 
-			CASE 
-				WHEN [value_type] = 5 THEN 5 
-				ELSE ISNULL([translated_value_type], [value_type]) 
-			END [value_type]
+			[value_type]
 		FROM 
 			[#key_value_pairs]
 		WHERE 
@@ -1578,7 +1551,7 @@ FOR JSON PATH);
 		#translated_kvps
 	FROM 
 		keys;
-
+		
 	WITH core AS ( 
 		SELECT 
 			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
@@ -1591,10 +1564,7 @@ FOR JSON PATH);
 				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
 				ELSE ISNULL([translated_value], [value])
 			END [value], 
-			CASE 
-				WHEN [value_type] = 5 THEN 5 
-				ELSE ISNULL([translated_value_type], [value_type]) 
-			END [value_type]
+			[value_type]
 		FROM 
 			[#key_value_pairs]
 		WHERE 
