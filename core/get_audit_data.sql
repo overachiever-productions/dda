@@ -82,16 +82,26 @@ AS
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
 
 	IF @StartTime IS NOT NULL BEGIN 
 		IF @StartTime > @EndTime BEGIN
-			RAISERROR('@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
+			RAISERROR(N'@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
 			RETURN -12;
 		END;
+	END;
+
+	IF @EndAuditID IS NOT NULL AND (@StartAuditID IS NULL OR @EndAuditID <= @StartAuditID) BEGIN 
+		RAISERROR(N'@EndAuditID can only be specified when @StartAuditID has been specified and when @EndAuditID is > @StartAuditID. If you wish to specify just a single AuditID only, use @StartAuditID only.', 16, 1);
+		RETURN -13;
+	END;
+
+	IF @EndTransactionID IS NOT NULL AND @StartTransactionID IS NULL BEGIN 
+		RAISERROR(N'@EndTransactionID can only be used when @StartTransactionID has been specified. If you wish to specify just a single TransactionID only, use @StartTransactionID only.', 16, 1);
+		RETURN -14;
 	END;
 
 	-- Grab matching rows based upon inputs/constraints:
@@ -102,9 +112,7 @@ AS
 	FROM 
 		[dda].[audits]
 	WHERE 
-		{TimeFilters}
-		{Users}
-		{Tables}{AuditID}{TransactionID}
+		{TimeFilters}{Users}{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -123,6 +131,8 @@ FOR JSON PATH);
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
+	DECLARE @newlineAndTabs sysname = N'
+		'; 
 
 	IF @StartTime IS NOT NULL BEGIN 
 		SET @timeFilters = N'[timestamp] >= ''' + CONVERT(sysname, @StartTime, 121) + N''' AND [timestamp] <= ''' + CONVERT(sysname, @EndTime, 121) + N''' '; 
@@ -147,7 +157,7 @@ FOR JSON PATH);
 			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
 		END;
 		
-		IF @predicated = 1 SET @users = N'AND ' + @users;
+		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
 		SET @predicated = 1;
 	END;
 
@@ -169,7 +179,8 @@ FOR JSON PATH);
 			SET @tables = N'[table] = ''' + @TargetTables +''' ';  
 		END;
 		
-		IF @predicated = 1 SET @tables = N'AND ' + @tables;
+		IF @predicated = 1 SET @tables = @newlineAndTabs + N'AND ' + @tables;
+		SET @predicated = 1;
 	END;
 	
 	IF @StartAuditID IS NOT NULL BEGIN 
@@ -179,6 +190,9 @@ FOR JSON PATH);
 		ELSE BEGIN 
 			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
 		END;
+
+		IF @predicated = 1 SET @auditIdClause = @newlineAndTabs + N'AND ' + @auditIdClause;
+		SET @predicated = 1;
 	END;
 
 	IF @StartTransactionID IS NOT NULL BEGIN 
@@ -224,6 +238,9 @@ FOR JSON PATH);
 		END;
 		
 		SET @transactionIdClause = @transactionIdClause + N')';
+
+		IF @predicated = 1 SET @transactionIdClause = @newlineAndTabs + N'AND ' + @transactionIdClause;
+		SET @predicated = 1;
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
@@ -984,6 +1001,16 @@ AS
 		END;
 	END;
 
+	IF @EndAuditID IS NOT NULL AND (@StartAuditID IS NULL OR @EndAuditID <= @StartAuditID) BEGIN 
+		RAISERROR(N'@EndAuditID can only be specified when @StartAuditID has been specified and when @EndAuditID is > @StartAuditID. If you wish to specify just a single AuditID only, use @StartAuditID only.', 16, 1);
+		RETURN -13;
+	END;
+
+	IF @EndTransactionID IS NOT NULL AND @StartTransactionID IS NULL BEGIN 
+		RAISERROR(N'@EndTransactionID can only be used when @StartTransactionID has been specified. If you wish to specify just a single TransactionID only, use @StartTransactionID only.', 16, 1);
+		RETURN -14;
+	END;
+
 	-- Grab matching rows based upon inputs/constraints:
 	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
 	SELECT 
@@ -992,9 +1019,7 @@ AS
 	FROM 
 		[dda].[audits]
 	WHERE 
-		{TimeFilters}
-		{Users}
-		{Tables}{AuditID}{TransactionID}
+		{TimeFilters}{Users}{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1013,6 +1038,8 @@ FOR JSON PATH);
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
+	DECLARE @newlineAndTabs sysname = N'
+		'; 
 
 	IF @StartTime IS NOT NULL BEGIN 
 		SET @timeFilters = N'[timestamp] >= ''' + CONVERT(sysname, @StartTime, 121) + N''' AND [timestamp] <= ''' + CONVERT(sysname, @EndTime, 121) + N''' '; 
@@ -1037,7 +1064,7 @@ FOR JSON PATH);
 			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
 		END;
 		
-		IF @predicated = 1 SET @users = N'AND ' + @users;
+		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
 		SET @predicated = 1;
 	END;
 
@@ -1059,7 +1086,8 @@ FOR JSON PATH);
 			SET @tables = N'[table] = ''' + @TargetTables +''' ';  
 		END;
 		
-		IF @predicated = 1 SET @tables = N'AND ' + @tables;
+		IF @predicated = 1 SET @tables = @newlineAndTabs + N'AND ' + @tables;
+		SET @predicated = 1;
 	END;
 	
 	IF @StartAuditID IS NOT NULL BEGIN 
@@ -1069,6 +1097,9 @@ FOR JSON PATH);
 		ELSE BEGIN 
 			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
 		END;
+
+		IF @predicated = 1 SET @auditIdClause = @newlineAndTabs + N'AND ' + @auditIdClause;
+		SET @predicated = 1;
 	END;
 
 	IF @StartTransactionID IS NOT NULL BEGIN 
@@ -1114,6 +1145,9 @@ FOR JSON PATH);
 		END;
 		
 		SET @transactionIdClause = @transactionIdClause + N')';
+
+		IF @predicated = 1 SET @transactionIdClause = @newlineAndTabs + N'AND ' + @transactionIdClause;
+		SET @predicated = 1;
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
