@@ -1,4 +1,12 @@
 # Change Log
+## [3.2] - 2021-03-13
+Bug-Fix for known-issue with v3.0.
+
+## Known-Issues: :zap:
+- A number of reported potential bugs with JSON translation - but not yet confirmed. Those confirmed will be either addressed as part of the v4.0 release or documented in v4.0 as known issues. 
+
+## Fixed: 
+- Known issue from v3.0 release with JSON translation on 2016 SQL Server instances breaking `"dump"` operations has been corrected. 
 
 ## [3.0] - 2021-03-09
 Translations via Foreign Key Mappings + JSON formatting fixes + search improvements.
