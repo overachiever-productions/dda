@@ -290,6 +290,9 @@ FOR JSON PATH);
 
 	SELECT @matchedRows = @@ROWCOUNT;
 
+SELECT * FROM [#raw_data];
+RETURN 0;
+
 	-- short-circuit options for transforms:
 	IF (@matchedRows < 1) OR (@TransformOutput <> 1) GOTO Final_Projection;
 
@@ -776,7 +779,7 @@ FOR JSON PATH);
 			SELECT 
 				x.[row_number], 
 				f.[json_row_id], 
-				COALESCE(STUFF(
+				NULLIF(COALESCE(STUFF(
 					(
 						SELECT 
 							N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
@@ -794,8 +797,8 @@ FOR JSON PATH);
 							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') [key_data],
-				COALESCE(STUFF(
+				, 1, 1, N''), N''), N'') [key_data],
+				NULLIF(COALESCE(STUFF(
 					(
 						SELECT
 							N',' + 
@@ -813,7 +816,7 @@ FOR JSON PATH);
 							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') [detail_data]
+				, 1, 1, N''), N''), N'') [detail_data]
 			FROM 
 				[#raw_data] [x]
 				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
@@ -823,7 +826,7 @@ FOR JSON PATH);
 		[serialized] AS ( 
 			SELECT 
 				[x].[row_number], 
-				N'[' + COALESCE(STUFF(
+				N'[' + NULLIF(COALESCE(STUFF(
 					(
 						SELECT 
 							N',' + 
@@ -834,7 +837,7 @@ FOR JSON PATH);
 							[c].[json_row_id]
 						FOR XML PATH('')
 					)
-				, 1, 1, N''), N'') + N']' [serialized]
+				, 1, 1, N''), N''), N'') + N']' [serialized]
 
 			FROM 
 				[#raw_data] [x] 
@@ -866,7 +869,7 @@ FOR JSON PATH);
 	[keys] AS ( 
 		SELECT 
 			[x].[row_number], 
-			COALESCE(STUFF(
+			NULLIF(COALESCE(STUFF(
 				(
 					SELECT 
 						N',' + 
@@ -882,7 +885,7 @@ FOR JSON PATH);
 					FOR XML PATH('')
 					
 				)
-			, 1, 1, N''), N'') [key_data]
+			, 1, 1, N''), N''), N'') [key_data]
 
 		FROM 
 			[row_numbers] x
@@ -891,7 +894,7 @@ FOR JSON PATH);
 	[details] AS (
 		SELECT 
 			[x].[row_number], 
-			COALESCE(STUFF(
+			NULLIF(COALESCE(STUFF(
 				(
 					SELECT 
 						N',' + 
@@ -906,7 +909,7 @@ FOR JSON PATH);
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
 					FOR XML PATH('')
 				)
-			, 1, 1, N''), N'') [detail_data]
+			, 1, 1, N''), N''), N'') [detail_data]
 		FROM 
 			[row_numbers] x
 	)
@@ -1578,7 +1581,7 @@ FOR JSON PATH);
 		#translated_kvps
 	FROM 
 		keys;
-
+		
 	WITH core AS ( 
 		SELECT 
 			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
