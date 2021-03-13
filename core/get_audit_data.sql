@@ -35,7 +35,6 @@
 
 
 
-
 */
 
 DROP PROC IF EXISTS dda.[get_audit_data];
@@ -465,46 +464,6 @@ FOR JSON PATH);
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
-	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
--- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
--- DDA-39: Bug/Busted:
-	--DELETE FROM [#key_value_pairs] 
-	--WHERE
-	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
-
-	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = v.[translation_value] 
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
 	-- address translation_keys: 
 	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
 		
@@ -585,6 +544,38 @@ FOR JSON PATH);
 		WHERE 
 			[to_value] IS NOT NULL; -- ditto... 
 	END;
+	
+	UPDATE x 
+	SET 
+		x.[translated_column] = c.[translated_name], 
+		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+	FROM 
+		[#key_value_pairs] x
+		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+	-- Stage from/to value translations:
+	UPDATE x 
+	SET
+		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+	UPDATE x 
+	SET
+		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[to_value] IS NOT NULL; -- ditto... 
 
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
@@ -600,36 +591,6 @@ FOR JSON PATH);
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
-
--- PERF / TODO:
-	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
--- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
--- TODO: test this against a 'wide' table - I've only been testing narrow tables to this point... 
--- ACTUALLY, these aren't quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'key'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'key'
---		);
----- PERF: also, if I don't 'pre-exclude' these... then 2x passes here is crappy.
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'detail'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'detail'
---		);
-
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
@@ -1372,46 +1333,6 @@ FOR JSON PATH);
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
-	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
--- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
--- DDA-39: Bug/Busted:
-	--DELETE FROM [#key_value_pairs] 
-	--WHERE
-	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
-
-	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
 	-- address translation_keys: 
 	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
 		
@@ -1493,6 +1414,38 @@ FOR JSON PATH);
 			[to_value] IS NOT NULL; -- ditto... 
 	END;
 
+	UPDATE x 
+	SET 
+		x.[translated_column] = c.[translated_name], 
+		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+	FROM 
+		[#key_value_pairs] x
+		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+	-- Stage from/to value translations:
+	UPDATE x 
+	SET
+		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+	UPDATE x 
+	SET
+		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[to_value] IS NOT NULL; -- ditto... 
+
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
@@ -1507,36 +1460,6 @@ FOR JSON PATH);
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
-
--- PERF / TODO:
-	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
--- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
--- TODO: test this against a 'wide' table - I've only been testing narrow tables to this point... 
--- ACTUALLY, these aren't quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'key'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'key'
---		);
----- PERF: also, if I don't 'pre-exclude' these... then 2x passes here is crappy.
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'detail'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'detail'
---		);
-
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
