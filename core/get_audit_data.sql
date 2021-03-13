@@ -290,9 +290,6 @@ FOR JSON PATH);
 
 	SELECT @matchedRows = @@ROWCOUNT;
 
-SELECT * FROM [#raw_data];
-RETURN 0;
-
 	-- short-circuit options for transforms:
 	IF (@matchedRows < 1) OR (@TransformOutput <> 1) GOTO Final_Projection;
 
