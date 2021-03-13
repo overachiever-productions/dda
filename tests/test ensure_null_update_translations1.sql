@@ -44,16 +44,14 @@ BEGIN
 		[table_name],
 		[column_name],
 		[key_value],
-		[translation_value],
-		[translation_value_type]
+		[translation_value]
 	)
 	VALUES	
 	(
 		N'dbo.SortTablE',
 		N'ColCHaR',
 		N'0x999',
-		N'TRANSLATED:1000',
-		1
+		N'TRANSLATED:1000'
 	);
 
 	DROP TABLE IF EXISTS #search_output;
