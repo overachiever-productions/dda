@@ -583,7 +583,7 @@ FOR JSON PATH);
 		[translated_update_value] = N'{"from":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
 				ELSE ISNULL([translated_from_value], [from_value])
-			END + N', "to":' + CASE 
+			END + N',"to":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
@@ -1452,7 +1452,7 @@ FOR JSON PATH);
 		[translated_update_value] = N'{"from":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
 				ELSE ISNULL([translated_from_value], [from_value])
-			END + N', "to":' + CASE 
+			END + N',"to":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
