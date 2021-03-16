@@ -103,7 +103,7 @@ BEGIN
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 	EXEC [tSQLt].[AssertEquals] @Expected = 1029, @Actual = @auditId; 
 
-	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"OrderID":101035,"CustomerID":450}],"detail":[{"ColChar":{"from":null, "to":"TRANSLATED:1000"}}]}]';
+	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"OrderID":101035,"CustomerID":450}],"detail":[{"ColChar":{"from":null,"to":"TRANSLATED:1000"}}]}]';
 
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
 
