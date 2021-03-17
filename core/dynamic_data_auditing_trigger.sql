@@ -1,46 +1,5 @@
 /*
 
-	TODO: 
-		current automation around deployment + updates of dynamic triggers is hard-coded/kludgey around exact
-		format/specification of the "FOR INSERT, UPDATE, DELETE" text in the following trigger definition. 
-			i.e., changing whitespace can/could/would-probably break 'stuff'. 
-
-			-- example of dump syntax.
-			[
-				{
-					"key": [{}],
-					"detail": [{}],
-					"dump": [
-						{
-							"deleted": [
-								{
-									"PKColumn": 35,
-									"AnotherColumn": 77.4, 
-									"ThirdColumn": "nnnnnnn"
-								},
-								{
-									"PKColumn": 36,
-									"AnotherColumn": 99.2,
-									"ThirdColumn": "mmmmmmm"
-								}
-							],
-							"inserted": [
-								{
-									"PKColumn": 135,
-									"AnotherColumn": 177.4,
-									"ThirdColumn": "xxxx"
-								},
-								{
-									"PKColumn": 236,
-									"AnotherColumn": 299.2,
-									"ThirdColumn": "yyyyy"
-								}
-							]
-						}
-					]
-				}
-			]
-
 
 */
 DROP TRIGGER IF EXISTS [dda].[dynamic_data_auditing_trigger_template];
@@ -86,6 +45,12 @@ AS
 			WHEN EXISTS(SELECT NULL FROM INSERTED) THEN N'INSERT'
 			ELSE N'DELETE'
 		END;
+
+	--~~ ::CUSTOM LOGIC::start
+
+
+	--~~ ::CUSTOM LOGIC::end
+
 
 	IF UPPER(@operationType) IN (N'INSERT', N'UPDATE') BEGIN
 		SELECT NEWID() [dda_trigger_id], * INTO #temp_inserted FROM inserted;

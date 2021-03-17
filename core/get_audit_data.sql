@@ -35,7 +35,6 @@
 
 
 
-
 */
 
 DROP PROC IF EXISTS dda.[get_audit_data];
@@ -82,16 +81,26 @@ AS
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
 
 	IF @StartTime IS NOT NULL BEGIN 
 		IF @StartTime > @EndTime BEGIN
-			RAISERROR('@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
+			RAISERROR(N'@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
 			RETURN -12;
 		END;
+	END;
+
+	IF @EndAuditID IS NOT NULL AND (@StartAuditID IS NULL OR @EndAuditID <= @StartAuditID) BEGIN 
+		RAISERROR(N'@EndAuditID can only be specified when @StartAuditID has been specified and when @EndAuditID is > @StartAuditID. If you wish to specify just a single AuditID only, use @StartAuditID only.', 16, 1);
+		RETURN -13;
+	END;
+
+	IF @EndTransactionID IS NOT NULL AND @StartTransactionID IS NULL BEGIN 
+		RAISERROR(N'@EndTransactionID can only be used when @StartTransactionID has been specified. If you wish to specify just a single TransactionID only, use @StartTransactionID only.', 16, 1);
+		RETURN -14;
 	END;
 
 	-- Grab matching rows based upon inputs/constraints:
@@ -102,9 +111,7 @@ AS
 	FROM 
 		[dda].[audits]
 	WHERE 
-		{TimeFilters}
-		{Users}
-		{Tables}{AuditID}{TransactionID}
+		{TimeFilters}{Users}{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -123,6 +130,8 @@ FOR JSON PATH);
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
+	DECLARE @newlineAndTabs sysname = N'
+		'; 
 
 	IF @StartTime IS NOT NULL BEGIN 
 		SET @timeFilters = N'[timestamp] >= ''' + CONVERT(sysname, @StartTime, 121) + N''' AND [timestamp] <= ''' + CONVERT(sysname, @EndTime, 121) + N''' '; 
@@ -147,7 +156,7 @@ FOR JSON PATH);
 			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
 		END;
 		
-		IF @predicated = 1 SET @users = N'AND ' + @users;
+		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
 		SET @predicated = 1;
 	END;
 
@@ -169,7 +178,8 @@ FOR JSON PATH);
 			SET @tables = N'[table] = ''' + @TargetTables +''' ';  
 		END;
 		
-		IF @predicated = 1 SET @tables = N'AND ' + @tables;
+		IF @predicated = 1 SET @tables = @newlineAndTabs + N'AND ' + @tables;
+		SET @predicated = 1;
 	END;
 	
 	IF @StartAuditID IS NOT NULL BEGIN 
@@ -179,6 +189,9 @@ FOR JSON PATH);
 		ELSE BEGIN 
 			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
 		END;
+
+		IF @predicated = 1 SET @auditIdClause = @newlineAndTabs + N'AND ' + @auditIdClause;
+		SET @predicated = 1;
 	END;
 
 	IF @StartTransactionID IS NOT NULL BEGIN 
@@ -224,6 +237,9 @@ FOR JSON PATH);
 		END;
 		
 		SET @transactionIdClause = @transactionIdClause + N')';
+
+		IF @predicated = 1 SET @transactionIdClause = @newlineAndTabs + N'AND ' + @transactionIdClause;
+		SET @predicated = 1;
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
@@ -448,46 +464,6 @@ FOR JSON PATH);
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
-	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
--- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
--- DDA-39: Bug/Busted:
-	--DELETE FROM [#key_value_pairs] 
-	--WHERE
-	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
-
-	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = v.[translation_value] 
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
 	-- address translation_keys: 
 	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
 		
@@ -568,6 +544,38 @@ FOR JSON PATH);
 		WHERE 
 			[to_value] IS NOT NULL; -- ditto... 
 	END;
+	
+	UPDATE x 
+	SET 
+		x.[translated_column] = c.[translated_name], 
+		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+	FROM 
+		[#key_value_pairs] x
+		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+	-- Stage from/to value translations:
+	UPDATE x 
+	SET
+		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+	UPDATE x 
+	SET
+		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[to_value] IS NOT NULL; -- ditto... 
 
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
@@ -575,7 +583,7 @@ FOR JSON PATH);
 		[translated_update_value] = N'{"from":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
 				ELSE ISNULL([translated_from_value], [from_value])
-			END + N', "to":' + CASE 
+			END + N',"to":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
@@ -583,36 +591,6 @@ FOR JSON PATH);
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
-
--- PERF / TODO:
-	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
--- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
--- TODO: test this against a 'wide' table - I've only been testing narrow tables to this point... 
--- ACTUALLY, these aren't quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'key'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'key'
---		);
----- PERF: also, if I don't 'pre-exclude' these... then 2x passes here is crappy.
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'detail'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'detail'
---		);
-
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 
@@ -984,6 +962,16 @@ AS
 		END;
 	END;
 
+	IF @EndAuditID IS NOT NULL AND (@StartAuditID IS NULL OR @EndAuditID <= @StartAuditID) BEGIN 
+		RAISERROR(N'@EndAuditID can only be specified when @StartAuditID has been specified and when @EndAuditID is > @StartAuditID. If you wish to specify just a single AuditID only, use @StartAuditID only.', 16, 1);
+		RETURN -13;
+	END;
+
+	IF @EndTransactionID IS NOT NULL AND @StartTransactionID IS NULL BEGIN 
+		RAISERROR(N'@EndTransactionID can only be used when @StartTransactionID has been specified. If you wish to specify just a single TransactionID only, use @StartTransactionID only.', 16, 1);
+		RETURN -14;
+	END;
+
 	-- Grab matching rows based upon inputs/constraints:
 	DECLARE @coreQuery nvarchar(MAX) = N'WITH total AS (
 	SELECT 
@@ -992,9 +980,7 @@ AS
 	FROM 
 		[dda].[audits]
 	WHERE 
-		{TimeFilters}
-		{Users}
-		{Tables}{AuditID}{TransactionID}
+		{TimeFilters}{Users}{Tables}{AuditID}{TransactionID}
 ) 
 SELECT @coreJSON = (SELECT 
 	[row_number],
@@ -1013,6 +999,8 @@ FOR JSON PATH);
 	DECLARE @auditIdClause nvarchar(MAX) = N'';
 	DECLARE @transactionIdClause nvarchar(MAX) = N'';
 	DECLARE @predicated bit = 0;
+	DECLARE @newlineAndTabs sysname = N'
+		'; 
 
 	IF @StartTime IS NOT NULL BEGIN 
 		SET @timeFilters = N'[timestamp] >= ''' + CONVERT(sysname, @StartTime, 121) + N''' AND [timestamp] <= ''' + CONVERT(sysname, @EndTime, 121) + N''' '; 
@@ -1037,7 +1025,7 @@ FOR JSON PATH);
 			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
 		END;
 		
-		IF @predicated = 1 SET @users = N'AND ' + @users;
+		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
 		SET @predicated = 1;
 	END;
 
@@ -1059,7 +1047,8 @@ FOR JSON PATH);
 			SET @tables = N'[table] = ''' + @TargetTables +''' ';  
 		END;
 		
-		IF @predicated = 1 SET @tables = N'AND ' + @tables;
+		IF @predicated = 1 SET @tables = @newlineAndTabs + N'AND ' + @tables;
+		SET @predicated = 1;
 	END;
 	
 	IF @StartAuditID IS NOT NULL BEGIN 
@@ -1069,6 +1058,9 @@ FOR JSON PATH);
 		ELSE BEGIN 
 			SET @auditIdClause = N'[audit_id] >= ' + CAST(@StartAuditID AS sysname) + N' AND [audit_id] <= '  + CAST(@EndAuditID AS sysname)
 		END;
+
+		IF @predicated = 1 SET @auditIdClause = @newlineAndTabs + N'AND ' + @auditIdClause;
+		SET @predicated = 1;
 	END;
 
 	IF @StartTransactionID IS NOT NULL BEGIN 
@@ -1114,6 +1106,9 @@ FOR JSON PATH);
 		END;
 		
 		SET @transactionIdClause = @transactionIdClause + N')';
+
+		IF @predicated = 1 SET @transactionIdClause = @newlineAndTabs + N'AND ' + @transactionIdClause;
+		SET @predicated = 1;
 	END;
 
 	SET @coreQuery = REPLACE(@coreQuery, N'{TimeFilters}', @timeFilters);
@@ -1338,46 +1333,6 @@ FOR JSON PATH);
 	WHERE 
 		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
 
-	-- Pre-Transform (remove rows from tables that do NOT have any possibility of translations happening):
--- PERF: see perf notes from above - this whole INSERT + DELETE (where not applicable) is great, but a BETTER OPTION IS: INSERT-ONLY-WHERE-APPLICABLE.
--- DDA-39: Bug/Busted:
-	--DELETE FROM [#key_value_pairs] 
-	--WHERE
-	--	[table] COLLATE SQL_Latin1_General_CP1_CI_AS NOT IN (SELECT [table_name] FROM dda.[translation_columns] UNION SELECT [table_name] FROM dda.[translation_values]);
-
-	-- Stage Translations (start with Columns, then do scalar (INSERT/DELETE values), then do from-to (UPDATE) values:
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = v.[translation_value]
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
 	-- address translation_keys: 
 	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
 		
@@ -1459,13 +1414,45 @@ FOR JSON PATH);
 			[to_value] IS NOT NULL; -- ditto... 
 	END;
 
+	UPDATE x 
+	SET 
+		x.[translated_column] = c.[translated_name], 
+		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+	FROM 
+		[#key_value_pairs] x
+		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+			AND x.[value] NOT LIKE N'{"from":%"to":%';
+
+	-- Stage from/to value translations:
+	UPDATE x 
+	SET
+		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
+
+	UPDATE x 
+	SET
+		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
+	FROM 
+		[#key_value_pairs] x 
+		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
+			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
+	WHERE 
+		[to_value] IS NOT NULL; -- ditto... 
+
 	-- Serialize from/to values (UPDATE summaries) back down to JSON:
 	UPDATE [#key_value_pairs] 
 	SET 
 		[translated_update_value] = N'{"from":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
 				ELSE ISNULL([translated_from_value], [from_value])
-			END + N', "to":' + CASE 
+			END + N',"to":' + CASE 
 				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
 				ELSE + ISNULL([translated_to_value], [to_value])
 			END + N'}'
@@ -1473,36 +1460,6 @@ FOR JSON PATH);
 		[translated_from_value] IS NOT NULL 
 		OR 
 		[translated_to_value] IS NOT NULL;
-
--- PERF / TODO:
-	-- Remove any audited rows where columns/values translations were POSSIBLE, but did not apply at all to ANY of the audit-data captured: 
--- PERF: might make sense to move this up above the previous UPDATE against KVP... as well? Or does it need to logically stay here? 
--- TODO: test this against a 'wide' table - I've only been testing narrow tables to this point... 
--- ACTUALLY, these aren't quite working... i.e., need to revisit either pre-exclusions or post exclusions... 
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'key'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'key'
---		);
----- PERF: also, if I don't 'pre-exclude' these... then 2x passes here is crappy.
---	DELETE FROM [#key_value_pairs] 
---	WHERE 
---		[kvp_type] = N'detail'
---		AND [row_number] IN (
---			SELECT [row_number] FROM [#key_value_pairs] 
---			WHERE 
---				[translated_column] IS NULL 
---				AND [translated_value] IS NULL 
---				AND [translated_update_value] IS NULL 
---				AND [kvp_type] = N'detail'
---		);
-
 
 	-- Collapse translations + non-translations down to a single working set: 
 	WITH core AS ( 

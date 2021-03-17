@@ -1,4 +1,15 @@
 # Change Log
+## [4.0] - 2021-03-16
+
+
+## Known-Issues: :zap:
+- Problem with XML-encoding of translated JSON data on SQL Server 2016 instances. (e.g., assume you've created a mapping for `""` to be treated as the literal value `"<EMPTY>"` for a given table/column; on SQL Server 2017+, this will render as "<EMPTY>", but on SQL Server 2016 instances, this will render as `"&lt;EMPTY&gt;"` instead. This is, sadly, a bug (due to use of xml-concatenation as a work-around for STRING_AGG() in 2016 instances that will be fixed in a later version of DDA.)
+
+
+## Fixed: 
+- Bug-Fix for scenarios where translations of UPDATE `"from"`/`"to"` values could/would introduce an 'extra' space. (e.g., if the raw JSON captured was something like `"first_name": {"from":"mike","to":"mikeeey"}` previous versions of DDA would add an extraneous space between FROM/TO values: `"first_name": {"from":"mike", "to":"mikeeey"}` - which has NOW been corrected. 
+
+
 ## [3.2] - 2021-03-13
 Bug-Fix for known-issue with v3.0.
 
