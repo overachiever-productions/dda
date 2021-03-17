@@ -171,7 +171,7 @@ BEGIN
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row2_json, @Message = @message;
 
 	SET @message = N'Problem with JSON formatting - row 3';
-	SET @expectedJSON = N'[{"key": [{"OrderID":249,"CustomerID":83}],"detail":[{"OrderDate":{"from":"2011-07-12T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":"FREE!!!", "to":33.99}}]},{"key": [{"OrderID":247,"CustomerID":178}],"detail":[{"OrderDate":{"from":"2016-04-14T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":1886.08,"to":33.99}}]},{"key": [{"OrderID":246,"CustomerID":151}],"detail":[{"OrderDate":{"from":"2020-02-10T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":1768.17,"to":33.99}}]}]';
+	SET @expectedJSON = N'[{"key": [{"OrderID":249,"CustomerID":83}],"detail":[{"OrderDate":{"from":"2011-07-12T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":"FREE!!!","to":33.99}}]},{"key": [{"OrderID":247,"CustomerID":178}],"detail":[{"OrderDate":{"from":"2016-04-14T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":1886.08,"to":33.99}}]},{"key": [{"OrderID":246,"CustomerID":151}],"detail":[{"OrderDate":{"from":"2020-02-10T13:48:39.567","to":"2021-02-02T16:07:44.330"},"OrderTotal":{"from":1768.17,"to":33.99}}]}]';
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row3_json, @Message = @message;
 
 END;

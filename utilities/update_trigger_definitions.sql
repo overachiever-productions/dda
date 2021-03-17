@@ -1,3 +1,5 @@
+-- PICKUP/NEXT: (down on lines 100+ish)
+
 DROP PROC IF EXISTS dda.update_trigger_definitions; 
 GO 
 
@@ -22,6 +24,7 @@ AS
 
 	SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = @definitionID;
 	DECLARE @pattern nvarchar(MAX) = N'%FOR INSERT, UPDATE, DELETE%';
+	DECLARE @custTriggerMarkerStart sysname = N'--~~ ::CUSTOM LOGIC::start', @custTriggerMarkerEnd sysname = N'--~~ ::CUSTOM LOGIC::end';
 	DECLARE @bodyStart int = PATINDEX(@pattern, @definition);
 
 	DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, @bodyStart, LEN(@definition) - @bodyStart);
@@ -49,6 +52,7 @@ AS
 		[parent_table] nvarchar(260) NULL,
 		[trigger_name] nvarchar(260) NULL,
 		[trigger_version] sysname NULL,
+		[custom_trigger_logic] nvarchar(MAX) NULL,
 		[for_insert] int NULL,
 		[for_update] int NULL,
 		[for_delete] int NULL,
@@ -63,6 +67,7 @@ AS
 		[parent_table],
 		[trigger_name],
 		[trigger_version],
+		[custom_trigger_logic],
 		[for_insert],
 		[for_update],
 		[for_delete],
@@ -89,9 +94,17 @@ AS
 	DECLARE @firstAs int = PATINDEX(N'%AS%', @body);
 	SET @body = SUBSTRING(@body, @firstAs, LEN(@body) - @firstAs);
 
+	DECLARE @customLogicStart int, @customLogicEnd int;
+	SELECT 
+		@customLogicStart = PATINDEX(N'%' + @custTriggerMarkerStart + N'%', @body), 
+		@customLogicEnd = PATINDEX(N'%' + @custTriggerMarkerEnd + N'%', @body) + LEN(@custTriggerMarkerEnd);
+
+	DECLARE @customLogicPlaceHolder nvarchar(MAX) = SUBSTRING(@body, @customLogicStart, @customLogicEnd - @customLogicStart);
+
 	DECLARE @scope sysname;
 	DECLARE @scopeCount int;
 	DECLARE @directive nvarchar(MAX);
+	DECLARE @currentCustomTriggerLogic nvarchar(MAX);
 	DECLARE @directiveTemplate nvarchar(MAX) = N'ALTER TRIGGER {triggerName} ON {tableName} FOR {scope}
 ';
 	DECLARE @sql nvarchar(MAX);
@@ -153,6 +166,18 @@ AS
 		END;
 
 		SET @sql = @directive + @body;
+
+		SELECT @currentCustomTriggerLogic = [definition] FROM dda.[extract_custom_trigger_logic](@triggerName);
+		IF NULLIF(@currentCustomTriggerLogic, N'') IS NOT NULL BEGIN 
+
+			SET @currentCustomTriggerLogic = @custTriggerMarkerStart + @currentCustomTriggerLogic + @custTriggerMarkerEnd;
+			SET @sql = REPLACE(@sql, @customLogicPlaceHolder, @currentCustomTriggerLogic);
+
+			IF @PrintOnly = 1 BEGIN 
+				PRINT N'Custom Logic Found in Trigger ' + @triggerName + N'. Logic would be forwarded into updated trigger definiton.';
+				PRINT N'		---->' + @currentCustomTriggerLogic + N'<----';
+			END;
+		END;
 
 		IF @PrintOnly = 1 BEGIN
 			PRINT N'-- IF @PrintONly were set to 0, the following change would have been executed: ';
