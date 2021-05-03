@@ -195,7 +195,7 @@ AS
 			IF @rowCount = 1 BEGIN
 				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
-				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
+				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] ';
 			  END;
 			ELSE BEGIN 
 				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
