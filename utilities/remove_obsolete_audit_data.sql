@@ -48,11 +48,12 @@ AS
 	DECLARE @batchStart datetime;
 	DECLARE @milliseconds int;
 	DECLARE @initialBatchSize int = @BatchSize;
+	DECLARE @continue bit = 1;
 	
 	---------------------------------------------------------------------------------------------------------------
 	-- Processing:
 	---------------------------------------------------------------------------------------------------------------
-	WHILE @currentRowsProcessed = @BatchSize BEGIN 
+	WHILE @continue = 1 BEGIN 
 	
 		SET @batchStart = GETDATE();
 	
@@ -79,6 +80,8 @@ AS
 					@totalRowsProcessed = @totalRowsProcessed + @@ROWCOUNT;
 
 			COMMIT; 
+
+			IF @currentRowsProcessed <> @BatchSize SET @continue = 0;
 
 			INSERT INTO [#batched_operation_602436EA] (
 				[timestamp],
