@@ -722,7 +722,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -757,7 +757,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -829,7 +829,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -898,7 +898,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -1002,7 +1002,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1041,7 +1041,7 @@ GO
 CREATE FUNCTION dda.[extract_custom_trigger_logic](@TriggerName sysname)
 RETURNS @output table ([definition] nvarchar(MAX) NULL) 
 AS 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @body nvarchar(MAX); 
@@ -1094,7 +1094,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN -- set to a random/unique value at deployment
@@ -1275,7 +1275,7 @@ AS
 			IF @rowCount = 1 BEGIN
 				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
-				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] '
+				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] ';
 			  END;
 			ELSE BEGIN 
 				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
@@ -1470,7 +1470,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -2167,8 +2167,8 @@ FOR JSON PATH);
 							AND [f].[json_row_id] = [k].[json_row_id]
 						ORDER BY 
 							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') [key_data],
 				NULLIF(COALESCE(STUFF(
 					(
@@ -2186,8 +2186,8 @@ FOR JSON PATH);
 							AND [f].[json_row_id] = [d].[json_row_id]		
 						ORDER BY 
 							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') [detail_data]
 			FROM 
 				[#raw_data] [x]
@@ -2207,8 +2207,8 @@ FOR JSON PATH);
 							[collapsed] [c] WHERE [c].[row_number] = [x].[row_number]
 						ORDER BY 
 							[c].[json_row_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') + N']' [serialized]
 
 			FROM 
@@ -2254,9 +2254,8 @@ FOR JSON PATH);
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
 					ORDER BY 
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH('')
-					
-				)
+					FOR XML PATH(''), TYPE
+				).value(N'.[1]', N'nvarchar(MAX)')
 			, 1, 1, N''), N''), N'') [key_data]
 
 		FROM 
@@ -2279,8 +2278,8 @@ FOR JSON PATH);
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
 					ORDER BY 
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH('')
-				)
+					FOR XML PATH(''), TYPE
+				).value(N'.[1]', N'nvarchar(MAX)')
 			, 1, 1, N''), N''), N'') [detail_data]
 		FROM 
 			[row_numbers] x
@@ -2339,7 +2338,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -3198,7 +3197,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	WITH core AS ( 
 		SELECT 
@@ -3258,7 +3257,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3411,7 +3410,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3833,7 +3832,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4110,7 +4109,7 @@ CREATE PROC dda.[disable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4249,7 +4248,7 @@ CREATE PROC dda.[enable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v4.0.3562.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v4.2.3610.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4431,11 +4430,12 @@ AS
 	DECLARE @batchStart datetime;
 	DECLARE @milliseconds int;
 	DECLARE @initialBatchSize int = @BatchSize;
+	DECLARE @continue bit = 1;
 	
 	---------------------------------------------------------------------------------------------------------------
 	-- Processing:
 	---------------------------------------------------------------------------------------------------------------
-	WHILE @currentRowsProcessed = @BatchSize BEGIN 
+	WHILE @continue = 1 BEGIN 
 	
 		SET @batchStart = GETDATE();
 	
@@ -4462,6 +4462,8 @@ AS
 					@totalRowsProcessed = @totalRowsProcessed + @@ROWCOUNT;
 
 			COMMIT; 
+
+			IF @currentRowsProcessed <> @BatchSize SET @continue = 0;
 
 			INSERT INTO [#batched_operation_602436EA] (
 				[timestamp],
@@ -4659,8 +4661,8 @@ EXEC sp_executesql @body;
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 6. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'4.0.3562.1';
-DECLARE @VersionDescription nvarchar(200) = N'Translation enhancements + Administrative Improvements.';
+DECLARE @CurrentVersion varchar(20) = N'4.2.3610.1';
+DECLARE @VersionDescription nvarchar(200) = N'Minor Bug Fixes.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])

@@ -1,4 +1,17 @@
 # Change Log
+
+## [4.2] - 2021-05-03
+Minor Bug Fixes. 
+
+## Known-Issues 
+- **BUG:** Known BUG with JSON formatting in `dda.get_audit_data` where mapped/defined translations change 'JSON-data-types'. e.g., assume you have a mapped translation in `dda.translation_values` that translates the integer/number (magic-number) value `999` to `'MAX_VALUE'`. This could/should result in JSON output of `"MAX_VALUE"` but can/will (in some cases) result in buggy output of `MAX_VALUE` (i.e., treatment of a string as 'numeric'). NOTE: This bug is SEEMINGLY intermittent - i.e., it's hit or miss whether this happens. 
+
+## Fixed 
+- Corrected issue with SQL Server 2016 implementations of `dda.get_audit_data` where JSON output could/would be XML-encoded. (2017+ implementations are using `STRING_AGG()` for string concat/aggregation - whereas 2016 implementation was using an incomplete version of xml-string-concatenation (which has now been fixed).)
+
+## Added 
+- Additional new Unit Tests to address XML-encoding issues and 'document' problems with JSON encoding of translated values that shift/change data-types. 
+
 ## [4.0] - 2021-03-16
 Translation enhancements + Administrative Improvements.
 
