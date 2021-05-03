@@ -755,8 +755,8 @@ FOR JSON PATH);
 							AND [f].[json_row_id] = [k].[json_row_id]
 						ORDER BY 
 							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') [key_data],
 				NULLIF(COALESCE(STUFF(
 					(
@@ -774,8 +774,8 @@ FOR JSON PATH);
 							AND [f].[json_row_id] = [d].[json_row_id]		
 						ORDER BY 
 							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') [detail_data]
 			FROM 
 				[#raw_data] [x]
@@ -795,8 +795,8 @@ FOR JSON PATH);
 							[collapsed] [c] WHERE [c].[row_number] = [x].[row_number]
 						ORDER BY 
 							[c].[json_row_id]
-						FOR XML PATH('')
-					)
+						FOR XML PATH(''), TYPE
+					).value(N'.[1]', N'nvarchar(MAX)')
 				, 1, 1, N''), N''), N'') + N']' [serialized]
 
 			FROM 
@@ -842,9 +842,8 @@ FOR JSON PATH);
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
 					ORDER BY 
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH('')
-					
-				)
+					FOR XML PATH(''), TYPE
+				).value(N'.[1]', N'nvarchar(MAX)')
 			, 1, 1, N''), N''), N'') [key_data]
 
 		FROM 
@@ -867,8 +866,8 @@ FOR JSON PATH);
 						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
 					ORDER BY 
 						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH('')
-				)
+					FOR XML PATH(''), TYPE
+				).value(N'.[1]', N'nvarchar(MAX)')
 			, 1, 1, N''), N''), N'') [detail_data]
 		FROM 
 			[row_numbers] x
