@@ -34,7 +34,7 @@ BEGIN
 		'sa', 
 		'INSERT', 
 		13465112, 
-		1, 
+		3, 
 		N'[{"key":[{"row_id":5450}],"detail":[{"row_id":5450,"entry_date":"2021-03-08T17:55:01.240","operation_type":"DL","batch_size":399,"login_creation_time_ms":999,"count_of_sys_principals":-999}]},{"key":[{"row_id":5456}],"detail":[{"row_id":5450,"entry_date":"2021-03-08T17:55:01.240","operation_type":"CL","batch_size":399,"login_creation_time_ms":999,"count_of_sys_principals":-999}]}]' 
 	);
 
@@ -105,8 +105,7 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@TargetUsers = N'sa',
-		@TargetTables = N'login_metrics',
+		@StartAuditID = 1029,
 		@TransformOutput = 1;
 
 	-----------------------------------------------------------------------------------------------------------------
@@ -117,3 +116,4 @@ BEGIN
 	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"row_id":5450}],"detail":[{"row_id":5450,"entry_date":"2021-03-08T17:55:01.240","operation_type":"DELETE LOGIN","batch_size":399,"login_creation_time_ms":999,"count_of_sys_principals":-999}]},{"key":[{"row_id":5456}],"detail":[{"row_id":5450,"entry_date":"2021-03-08T17:55:01.240","operation_type":"CREATE LOGIN","batch_size":399,"login_creation_time_ms":999,"count_of_sys_principals":-999}]}]';
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
 END;
+

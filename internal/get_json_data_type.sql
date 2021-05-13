@@ -76,6 +76,7 @@ AS
     	IF @value IN ('true', 'false') RETURN 3;
 
 		-- 2
+		IF @value = N'' RETURN 1; 
 		IF @value NOT LIKE '%[^0123456789.-]%' RETURN 2; 
 
 		-- 4 & 5
