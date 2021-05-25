@@ -1,5 +1,21 @@
 # Change Log
 
+## [5.0] - 2021-05-25
+
+## Known-Issues
+- No known-issues. 
+
+## Fixed
+- Major overhaul/streamlining of translation operations within `dda.get_audit_data` to simplify logic (cleanup of several DRY violations), boost perf, and address previous Known-Issues/problems with JSON data-types of translated outputs.
+- Corrected issues with casing of `true`, `false`, and `null` as de-facto JSON 'types' (boolean and null) vs 'mixed' case values (such as 'False', 'TRUE', 'NULL', 'nuLL', etc) being treated as strings - i.e., only lower-case values will be treated as true/false/null (as per JSON spec).
+
+## Added 
+- Added `dda.set_trigger_bypass_on` to enable temporary bypass against ALL dynamic triggers by admins and/or other `db_owner`s running ad-hoc changes, updates/deployments or OTHER operations that do not (and should not) need to be tracked via audits. Also added `dda.set_trigger_bypass_off` for symmetry/simplicity of use. 
+
+## Changed 
+- FULL overhaul of unit tests. 
+- MUTATE is now a 1st class operation_type in `dda.audits` - i.e., DUMP behavior still happens as defined previously, but instead of operations being 'coded' as an `UPDATE`, they're now coded as a `MUTATE` (if and only if we can't figure out what PK values might've changed - i.e., ONLY if a DUMP is the only safe outcome).
+
 ## [4.2] - 2021-05-03
 Minor Bug Fixes. 
 
