@@ -10,9 +10,15 @@ Value of the Type column	JSON data type
 5	object
 
 
-
+				
+				-- NULLS:
 				SELECT dda.[get_json_data_type](NULL);
+				SELECT dda.[get_json_data_type]('null'); 
+				SELECT dda.[get_json_data_type]('NULL'); -- string
+
+
 				SELECT dda.[get_json_data_type]('true');
+				SELECT dda.[get_json_data_type]('True');  -- string (not boolean)
 				SELECT dda.[get_json_data_type](325);
 				SELECT dda.[get_json_data_type](325.00);
 				SELECT dda.[get_json_data_type](-325);
@@ -70,10 +76,10 @@ AS
 
 		-- 0
 		IF @value IS NULL RETURN 0;
-		IF @value = N'null' RETURN 0;
+		IF @value COLLATE SQL_Latin1_General_CP1_CS_AS = N'null' RETURN 0;
     	
-		-- 3
-    	IF @value IN ('true', 'false') RETURN 3;
+		-- 3  true/false must be lower-case to equate to boolean values - otherwise, it's a string. 
+    	IF @value COLLATE SQL_Latin1_General_CP1_CS_AS IN ('true', 'false') RETURN 3;
 
 		-- 2
 		IF @value = N'' RETURN 1; 
