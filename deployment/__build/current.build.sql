@@ -265,6 +265,12 @@ END;
 -----------------------------------
 --##INCLUDE: utilities\remove_obsolete_audit_data.sql
 
+-----------------------------------
+--##INCLUDE: utilities\set_bypass_triggers_on.sql
+
+-----------------------------------
+--##INCLUDE: utilities\set_bypass_triggers_off.sql
+
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Randomize bypass trigger 'key' for every environment/deployment:
