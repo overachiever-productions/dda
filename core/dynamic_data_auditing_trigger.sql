@@ -17,7 +17,7 @@ AS
 	-- {copyright}
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
-	IF @context = 0x999090000000000000009999 BEGIN -- set to a random/unique value at deployment
+	IF @context = 0x999090000000000000009999 BEGIN /* @context is randomized/uniquified during deployment ... */
 		PRINT 'Dynamic Data Auditing Trigger bypassed.';
 		GOTO Cleanup; 
 	END;
@@ -227,9 +227,10 @@ AS
 					SET @json = REPLACE(@json, N'{deleted}', (SELECT * FROM [#temp_deleted] FOR JSON PATH));
 					SET @json = REPLACE(@json, N'{inserted}', (SELECT * FROM [#temp_inserted] FOR JSON PATH));
 
+					SET @operationType = N'MUTATE'; 
+
 					RAISERROR(N'Dynamic Data Audits Warning:%s%sMulti-row UPDATEs that modify Primary Key values cannot be tracked without a mapping in dda.secondary_keys.%s%sThis operation was allowed, but resulted in a "dump" to dda.audits vs row-by-row change-tracking details.', 8, 1, @crlf, @tab, @crlf, @tab);
 				END;
-				
 			END;
 		  END;
 		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
