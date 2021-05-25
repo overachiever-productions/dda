@@ -1,78 +1,19 @@
 IF OBJECT_ID('dda.translation_values') IS NULL BEGIN
 
 	CREATE TABLE dda.translation_values (
-		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
+		[translation_value_id] int IDENTITY(1,1) NOT NULL, 
 		[table_name] sysname NOT NULL, 
 		[column_name] sysname NOT NULL, 
 		[key_value] sysname NOT NULL, 
 		[translation_value] sysname NOT NULL,
-		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
+		[target_json_type] tinyint NULL,
 		[notes] nvarchar(MAX) NULL,
-		CONSTRAINT PK_translation_keys PRIMARY KEY NONCLUSTERED ([translation_key_id])
+		CONSTRAINT PK_translation_values PRIMARY KEY NONCLUSTERED ([translation_value_id])
 	);
 
 	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values_by_identifiers ON dda.[translation_values] ([table_name], [column_name], [key_value]);
 
 END;
-
--- v0.9 to v1.0 Upgrade: 
---IF NOT EXISTS (SELECT NULL FROM sys.columns	WHERE [object_id] = OBJECT_ID('dda.translation_values') AND [name] = N'translation_value_type') BEGIN 
-
---	CREATE TABLE dda.translation_values2 (
---		[translation_key_id] int IDENTITY(1,1) NOT NULL, 
---		[table_name] sysname NOT NULL, 
---		[column_name] sysname NOT NULL, 
---		[key_value] sysname NOT NULL, 
---		[translation_value] sysname NOT NULL,
---		[translation_value_type] int NOT NULL CONSTRAINT DF_translation_values_translation_value_type DEFAULT (1), -- default to string
---		[notes] nvarchar(MAX) NULL,
---		CONSTRAINT PK_translation_keys2 PRIMARY KEY NONCLUSTERED ([translation_key_id])
---	);
-
---	CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values2_by_identifiers ON dda.[translation_values2] ([table_name], [column_name], [key_value]);
-
---	BEGIN TRY
---		BEGIN TRAN; 
-		
---			SET IDENTITY_INSERT dda.[translation_values2] ON;
-
---			INSERT INTO [dda].[translation_values2] (
---				[translation_key_id],
---				[table_name],
---				[column_name],
---				[key_value],
---				[translation_value],
---				[translation_value_type],
---				[notes]
---			)
---			SELECT 
---				[translation_key_id],
---				[table_name],
---				[column_name],
---				[key_value],
---				[translation_value],
---				1 [translation_value_type], -- default to 1 (string)
---				[notes] 
---			FROM 
---				dda.[translation_values];
-
---			SET IDENTITY_INSERT dda.[translation_values2] OFF;
-
---			DROP TABLE dda.[translation_values]; 
-
---			EXEC sp_rename N'dda.translation_values2.CLIX_translation_values2_by_identifiers', N'CLIX_translation_values_by_identifiers', N'INDEX';
-
---			EXEC sp_rename N'dda.translation_values2', N'translation_values'; -- table will STAY in the dda schema
---			EXEC sp_rename N'dda.PK_translation_keys2', N'PK_translation_keys';
-
---		COMMIT;
---	END TRY
---	BEGIN CATCH
---		SELECT N'WARNING!!!!!' [Deployment Error], N'Failured attempt to add translation_value_type to dda.translation_values' [Context], ERROR_NUMBER() [Error_Number], ERROR_MESSAGE() [Error_Message];
---		ROLLBACK;
---	END CATCH;
-
---END;
 
 -- v2.0 to v3.0 correction to PK column name and PK constraint name: 
 IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_key_id') BEGIN 
@@ -84,6 +25,53 @@ END;
 IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'translation_value_type') BEGIN
 	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP CONSTRAINT [DF_translation_values_translation_value_type]';
 	EXEC sp_executesql N'ALTER TABLE [dda].[translation_values] DROP COLUMN [translation_value_type];';
+END;
+
+-- v4.2 to v5.0 cough, re-adding types column - but now as target_json_type: 
+IF NOT EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.translation_values') AND [name] = N'target_json_type') BEGIN 
+	BEGIN TRY
+		BEGIN TRANSACTION; 
+			CREATE TABLE dda.translation_values_tmp (
+				translation_value_id int IDENTITY (1, 1) NOT NULL,
+				table_name sysname NOT NULL,
+				column_name sysname NOT NULL,
+				key_value sysname NOT NULL,
+				translation_value sysname NOT NULL,
+				target_json_type tinyint NULL,
+				notes nvarchar(MAX) NULL 
+			);
+
+			IF EXISTS(SELECT NULL FROM [dda].[translation_values]) BEGIN
+				SET IDENTITY_INSERT dda.[translation_values_tmp] ON;
+
+				EXEC (
+					'INSERT INTO dda.translation_values_tmp (translation_value_id, table_name, column_name, key_value, translation_value, notes)
+					 SELECT translation_value_id, table_name, column_name, key_value, translation_value, notes FROM dda.translation_values WITH (TABLOCKX);'
+				);
+
+				SET IDENTITY_INSERT dda.[translation_values_tmp] OFF;
+			END;
+
+			DROP TABLE dda.translation_values;
+
+			EXECUTE sp_rename N'dda.translation_values_tmp', N'translation_values', 'OBJECT';
+
+			ALTER TABLE dda.translation_values ADD CONSTRAINT PK_dda_translation_values PRIMARY KEY NONCLUSTERED (translation_value_id);
+
+			CREATE UNIQUE CLUSTERED INDEX CLIX_translation_values_by_identifiers ON dda.translation_values (
+				table_name,
+				column_name,
+				key_value
+			);
+
+		COMMIT;
+	END TRY
+	BEGIN CATCH 
+		DECLARE @error nvarchar(MAX);
+		SELECT @error = N'Terminating DDA Update Script. Fatal Error Encountered. ' + CAST(ERROR_NUMBER() AS sysname) + N' - ' + ERROR_MESSAGE();
+		ROLLBACK; 
+		RAISERROR(@error, 21, 1) WITH LOG;
+	END CATCH;
 END;
 
 

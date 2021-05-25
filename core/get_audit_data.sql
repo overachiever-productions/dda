@@ -56,8 +56,8 @@ CREATE PROC dda.[get_audit_data]
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
-    SET NOCOUNT ON; 
-
+    SET NOCOUNT ON;
+	
 	-- {copyright}
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
@@ -269,14 +269,9 @@ FOR JSON PATH);
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
-		[translated_change_key] nvarchar(MAX) NULL, 
-		[translated_change_detail] nvarchar(MAX) NULL, 
-		[translated_multi_row] nvarchar(MAX) NULL
+		[translated_json] nvarchar(MAX) NULL
 	);
 
-	-- NOTE: INSERT + EXEC (dynamic-SQL with everything needed from dda.audits in a single 'gulp') would make more sense here. 
-	--		BUT, INSERT + EXEC causes dreaded "INSERT EXEC can't be nested..." error if/when UNIT tests are used to test this code. 
-	--			So, this 'hack' of grabbing JSON (dynamically), shredding it, and JOINing 'back' to dda.audits... exists below):
 	INSERT INTO [#raw_data] (
 		[x].[row_number],
 		[x].[total_rows],
@@ -306,190 +301,310 @@ FOR JSON PATH);
 
 	SELECT @matchedRows = @@ROWCOUNT;
 
-	-- short-circuit options for transforms:
+	/* Short-circuit options for transforms: */
 	IF (@matchedRows < 1) OR (@TransformOutput <> 1) GOTO Final_Projection;
 
-	-- table translations: 
+	/* Translate table-names: */
 	UPDATE x 
 	SET 
 		[x].[translated_table] = CASE WHEN t.[translated_name] IS NULL THEN x.[table] ELSE t.[translated_name] END
 	FROM 
 		[#raw_data] x 
 		LEFT OUTER JOIN [dda].[translation_tables] t ON x.[table] = t.[table_name];
-		
-	CREATE TABLE [#key_value_pairs] ( 
-		[kvp_id] int IDENTITY(1,1) NOT NULL, 
-		[kvp_type] sysname NOT NULL, 
-		[row_number] int NOT NULL,
-		[json_row_id] int NOT NULL DEFAULT 0,  -- for 'multi-row' ... rows. 
-		[table] sysname NOT NULL, 
-		[column] sysname NOT NULL, 
-		[translated_column] sysname NULL, 
-		[value] nvarchar(MAX) NULL, 
-		[value_type] int NOT  NULL,
-		[translated_value] sysname NULL, 
-		[from_value] nvarchar(MAX) NULL, 
-		[translated_from_value] sysname NULL, 
-		[to_value] nvarchar(MAX) NULL, 
-		[translated_to_value] sysname NULL, 
-		[translated_update_value] nvarchar(MAX) NULL
+
+	CREATE TABLE #scalar ( 
+		[scalar_id] int IDENTITY(1,1) NOT NULL, 
+		[audit_id] int NOT NULL, 
+		[operation_type] char(6) NOT NULL,
+		[row_count] int NOT NULL,
+		[row_number] int NOT NULL, 
+		[json_row_id] int NOT NULL, 
+		[source_table] sysname NOT NULL, 
+		[change_details] nvarchar(MAX) NOT NULL, 
+		[translate_keys] nvarchar(MAX) NULL, 
+		[translated_details] nvarchar(MAX) NULL
 	);
 
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
+	WITH distinct_json_rows AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_count],
+			[x].[row_number], 
+			[r].[Key] [json_row_id], 
+			[x].[table], 
+			N'[' + [r].[Value] + N']' [change_details]  /* NOTE: without [surrounding brackets], shred no-worky down below... */
+		FROM 
+			[#raw_data] x 
+			CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r 
+		WHERE 
+			[x].[row_count] > 1
+	) 
+
+	INSERT INTO [#scalar] (
+		[audit_id],
+		[operation_type],
+		[row_count],
 		[row_number],
-		[column],
-		[value],
-		[value_type]
+		[json_row_id],
+		[source_table],
+		[change_details]
 	)
 	SELECT 
-		N'key' [kvp_type],
-		[x].[table], 
-		[x].[row_number],
-		[y].[Key] [column], 
-		[y].[Value] [value],
-		[y].[Type] [value_type]
-	FROM 
-		[#raw_data] x
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
-	WHERE 
-		x.[row_count] = 1
-		AND y.[Key] IS NOT NULL 
-		AND y.[Value] IS NOT NULL;
-
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
+		[audit_id],
+		[operation_type],
+		[row_count],
 		[row_number],
-		[column],
-		[value],
-		[value_type]
+		[json_row_id],
+		[table],
+		[change_details]
+	FROM 
+		[distinct_json_rows]
+
+	INSERT INTO [#scalar] (
+		[audit_id],
+		[operation_type],
+		[row_count],
+		[row_number],
+		[json_row_id],
+		[source_table],
+		[change_details]
 	)
 	SELECT 
-		N'detail' [kvp_type],
-		[x].[table], 
-		[x].[row_number],
-		[y].[Key] [column], 
-		[y].[Value] [value],
-		[y].[Type] [value_type]
+		[audit_id],
+		[operation_type],
+		1 [row_count], 
+		[row_number],
+		0 [json_row_id],
+		[table],
+		[change_details]
 	FROM 
-		[#raw_data] x 
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
+		[#raw_data]
+	WHERE
+		[row_count] = 1;
+
+	CREATE TABLE [#nodes] ( 
+		[node_id] int IDENTITY(1,1) NOT NULL, 
+		[audit_id] int NOT NULL,
+		[operation_type] char(6) NOT NULL,
+		[row_number] int NOT NULL, 
+		[json_row_id] int NOT NULL,
+		[node_type] sysname NOT NULL,
+		[source_table] sysname NOT NULL, 
+		[parent_json] nvarchar(MAX) NOT NULL,
+		[current_json] nvarchar(MAX) NULL,
+		[original_column] sysname NOT NULL, 
+		[original_value] nvarchar(MAX) NULL, 
+		[original_value_type] int NOT NULL, 
+		[translated_value] nvarchar(MAX) NULL, 
+		[translated_column] sysname NULL, 
+		[translated_value_type] int NULL 
+	);
+
+	WITH [keys] AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_number],
+			[x].[json_row_id],
+			N'key' [node_type],
+			[x].[source_table],
+			[x].[change_details] [parent_json],
+			[z].[Value] [current_json],
+			[y].[Key] [original_column],
+			ISNULL([y].[Value], N'null') [original_value],
+			[y].[Type] [original_value_type]
+		FROM 
+			[#scalar] x 
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].key'), N'$') z 
+			CROSS APPLY OPENJSON([z].[Value], N'$') y
+	)
+
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[keys];
+	
+	WITH [details] AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_number],
+			[x].[json_row_id],
+			N'detail' [node_type],
+			[x].[source_table],
+			[x].[change_details] [parent_json],
+			[z].[Value] [current_json],
+			[y].[Key] [original_column],
+			ISNULL([y].[Value], N'null') [original_value],
+			[y].[Type] [original_value_type]
+		FROM 
+			[#scalar] x 
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].detail'), N'$') z 
+			CROSS APPLY OPENJSON([z].[Value], N'$') y
+		WHERE 
+			[y].[Value] NOT LIKE '%from":%"to":%'
+	) 
+
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[details];
+
+	/* Extract from/to child nodes for UPDATES: */
+	SELECT 
+		[x].[audit_id],
+		[x].[operation_type],
+		[x].[row_number],
+		[x].[json_row_id],
+		N'detail' [node_type],
+		[x].[source_table],
+		[x].[change_details] [parent_json],
+		[z].[Value] [current_json],
+		[y].[Key] [original_column],
+		ISNULL([y].[Value], N'null') [original_value],
+		[y].[Type] [original_value_type]
+	INTO 
+		#updates
+	FROM 
+		[#scalar] x 
+		OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].detail'), N'$') z 
+		CROSS APPLY OPENJSON([z].[Value], N'$') y
 	WHERE 
-		x.[row_count] = 1
-		AND y.[Key] IS NOT NULL
-		AND y.[Value] IS NOT NULL;
+		[y].[Type] = 5 AND
+		[y].[Value] LIKE '%from":%"to":%';
 
-	IF EXISTS(SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN
+	WITH [from_to] AS ( 
 
-		WITH [row_keys] AS ( 
-			SELECT 
-				[x].[table], 
-				[x].[row_number],
-				[r].[Key] [json_row_id], 
-				[r].[Value] [change_details]
-			FROM 
-				[#raw_data] x 
-				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
-			WHERE 
-				x.[row_count] > 1
-		)
-
-		INSERT INTO [#key_value_pairs] (
-			[kvp_type],
-			[table],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		)
 		SELECT 
-			N'key' [kvp_type], 
-			[x].[table], 
+			[x].[audit_id],
+			[x].[operation_type],
 			[x].[row_number],
-			[x].[json_row_id], 
-			[y].[Key] [column], 
-			[y].[Value] [value],
-			[y].[Type] [value_type]
+			[x].[json_row_id],
+			[y].[Key] [node_type],
+			[x].[source_table],
+			[x].[parent_json],
+			[x].[current_json],
+			[x].[original_column],
+			ISNULL([y].[Value], N'null') [original_value], 
+			[y].[Type] [original_value_type]
 		FROM 
-			[row_keys] x
-			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.key'), '$') z
-			CROSS APPLY OPENJSON(z.[Value], N'$') y;
+			[#updates] x
+			CROSS APPLY OPENJSON([x].[original_value], N'$') y
+	)
 
-		-- ditto, for details:
-		WITH [row_details] AS ( 
-			SELECT 
-				[x].[table], 
-				[x].[row_number],
-				[r].[Key] [json_row_id], 
-				[r].[Value] [change_details]
-			FROM 
-				[#raw_data] x 
-				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
-			WHERE 
-				x.[row_count] > 1
-		)
-
-		INSERT INTO [#key_value_pairs] (
-			[kvp_type],
-			[table],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		)
-		SELECT 
-			N'detail' [kvp_type], 
-			[x].[table], 
-			[x].[row_number],
-			[x].[json_row_id], 
-			[y].[Key] [column], 
-			[y].[Value] [value],
-			[y].[Type] [value_type]
-		FROM 
-			[row_details] x
-			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.detail'), '$') z
-			CROSS APPLY OPENJSON(z.[Value], N'$') y;
-	END;
-
-	UPDATE [#key_value_pairs] 
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[from_to];	
+	
+	/* Translate Column Names: */
+	UPDATE x 
 	SET 
-		[from_value] = ISNULL(JSON_VALUE([value], N'$.from'), N'null'), 
-		[to_value] = ISNULL(JSON_VALUE([value], N'$.to'), N'null')
+		x.[translated_column] = [c].[translated_name]
+	FROM 
+		[#nodes] x 
+		LEFT OUTER JOIN dda.[translation_columns] c ON [x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[table_name] AND [x].[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[column_name]
 	WHERE 
-		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
+		x.[translated_column] IS NULL; 
 
-	-- address translation_keys: 
-	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
-		
-		CREATE TABLE #translation_key_values (
-			row_id int IDENTITY(1,1) NOT NULL, 
-			source_table sysname NOT NULL, 
-			source_column sysname NOT NULL, 
-			translation_key nvarchar(MAX) NOT NULL, 
-			translation_value nvarchar(MAX) NOT NULL
-		);
-			
+
+	CREATE TABLE #translation_key_values (
+		[row_id] int IDENTITY(1,1) NOT NULL, 
+		[source_table] sysname NOT NULL, 
+		[source_column] sysname NOT NULL, 
+		[translation_key] nvarchar(MAX) NOT NULL, 
+		[translation_value] nvarchar(MAX) NOT NULL, 
+		[target_json_type] tinyint NULL,
+		[weight] int NOT NULL DEFAULT (1)
+	);	
+
+	IF EXISTS (SELECT NULL FROM [#nodes] n LEFT OUTER JOIN dda.[translation_keys] tk ON [n].[source_table] = [tk].[table_name] AND [n].[original_column] = [tk].[column_name] WHERE [tk].[table_name] IS NOT NULL) BEGIN 
+
 		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
 		DECLARE @translationSql nvarchar(MAX);
 
 		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
 		SELECT DISTINCT
-			tk.[table_name], 
-			tk.[column_name], 
-			tk.[key_table],
-			tk.[key_column], 
-			tk.[value_column]
+			[tk].[table_name], 
+			[tk].[column_name], 
+			[tk].[key_table],
+			[tk].[key_column], 
+			[tk].[value_column]
 		FROM 
 			dda.[translation_keys] tk	
-			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+			LEFT OUTER JOIN [#nodes] x ON [tk].[table_name] = [x].[source_table] AND [tk].[column_name] = [x].[original_column]
 		WHERE 
-			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
+			[x].[source_table] IS NOT NULL AND [x].[original_column] IS NOT NULL;
 				
 		OPEN [translator];
 		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
@@ -513,378 +628,243 @@ FOR JSON PATH);
 		CLOSE [translator];
 		DEALLOCATE [translator];
 
-		-- map INSERT/DELETE translations:
-		UPDATE x 
-		SET 
-			x.[translated_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-		-- map FROM / TO translations:
-		UPDATE x 
-		SET
-			x.[translated_from_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-		WHERE 
-			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-		UPDATE x 
-		SET
-			x.[translated_to_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-		WHERE 
-			[to_value] IS NOT NULL; -- ditto... 
 	END;
-	
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+
+	INSERT INTO [#translation_key_values] (
+		[source_table],
+		[source_column],
+		[translation_key],
+		[translation_value], 
+		[target_json_type],
+		[weight]
+	)
+	SELECT DISTINCT /*  TODO: tired... not sure why I'm tolerating this code-smell/nastiness - but need to address it... */
+		v.[table_name] [source_table], 
+		v.[column_name] [source_column], 
+		v.[key_value] [translation_key],
+		v.[translation_value], 
+		v.[target_json_type],
+		2 [weight]
 	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
+		[#nodes] x 
+		INNER JOIN [dda].[translation_values] v ON x.[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name];
 
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
-	-- Serialize from/to values (UPDATE summaries) back down to JSON:
-	UPDATE [#key_value_pairs] 
-	SET 
-		[translated_update_value] = N'{"from":' + CASE 
-				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
-				ELSE ISNULL([translated_from_value], [from_value])
-			END + N',"to":' + CASE 
-				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
-				ELSE + ISNULL([translated_to_value], [to_value])
-			END + N'}'
-	WHERE 
-		[translated_from_value] IS NOT NULL 
-		OR 
-		[translated_to_value] IS NOT NULL;
-
-	-- Collapse translations + non-translations down to a single working set: 
-	WITH core AS ( 
-		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
-			[kvp_type], 
-			[row_number], 
-			[json_row_id],
-			ISNULL([translated_column], [column]) [column], 
-			CASE 
-				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
-				ELSE ISNULL([translated_value], [value])
-			END [value], 
-			[value_type]
+	/* Explicit values in dda.translation_values can/will/should OVERWRITE any mappings or translations provided by FKs defined in dda.translation_keys - so remove lower-ranked duplicates: */
+	WITH duplicates AS ( 
+		SELECT
+			row_id
 		FROM 
-			[#key_value_pairs]
-		WHERE 
-			[kvp_type] = N'key'
-	), 
-	[keys] AS (
-		SELECT 
-			[sort_id],
-			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		FROM 
-			core
+			[#translation_key_values] t1 
+			WHERE EXISTS ( 
+				SELECT NULL 
+				FROM [#translation_key_values] t2 
+				WHERE 
+					t1.[source_table] = t2.[source_table]
+					AND t1.[source_column] = t2.[source_column]
+					AND t1.[translation_key] = t2.[translation_key]
+				GROUP BY 
+					t2.[source_table], t2.[source_column], t2.[translation_key]
+				HAVING 
+					COUNT(*) > 1 
+					AND MAX(t2.[weight]) > t1.[weight]
+			)
 	)
 
+	DELETE x 
+	FROM 
+		[#translation_key_values] x 
+		INNER JOIN [duplicates] d ON [x].[row_id] = [d].[row_id];
+
+	IF EXISTS (SELECT NULL FROM [#translation_key_values]) BEGIN 
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value], 
+			x.[translated_value_type] = CASE WHEN v.[target_json_type] IS NOT NULL THEN [v].[target_json_type] ELSE dda.[get_json_data_type](v.[translation_value]) END
+		FROM 
+			[#nodes] x 
+			INNER JOIN [#translation_key_values] v ON 
+				[x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [v].[source_table] 
+				AND x.[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[original_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key];
+	END;
+
+	/* RE-ASSEMBLY */
+
+	/* Start with from-to values and translations: */
 	SELECT 
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
+		ISNULL([translated_column], [original_column]) [column_name], 
+		LEAD(ISNULL([translated_column], [original_column]), 1, NULL) OVER(PARTITION BY [row_number], [json_row_id] ORDER BY [node_id]) [next_column_name],
+		[row_number], 
+		[json_row_id], 
+		[node_type],
+		ISNULL([translated_value], [original_value]) [value], 
+		ISNULL([translated_value_type], [original_value_type]) [value_type], 
+		[node_id]
 	INTO 
-		#translated_kvps
+		#parts
 	FROM 
-		keys;
+		[#nodes]
+	WHERE 
+		[node_type] IN (N'from', N'to');
 
-	WITH core AS ( 
+	WITH [froms] AS ( 
 		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
-			[kvp_type], 
-			[row_number], 
-			[json_row_id],
-			[table], 
-			ISNULL([translated_column], [column]) [column], 
-			CASE 
-				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
-				ELSE ISNULL([translated_value], [value])
-			END [value], 
-			[value_type]
+			[x].[column_name],
+			[x].[row_number],
+			[x].[json_row_id],
+			[x].[value],
+			[x].[value_type],
+			[x].[node_id] 
 		FROM 
-			[#key_value_pairs]
+			[#parts] x
 		WHERE 
-			[kvp_type] = N'detail'
-
+			[node_type] = N'from'
 	), 
-	[details] AS (
+	[tos] AS ( 
 		SELECT 
-			[sort_id],
-			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
+			[x].[column_name],
+			[x].[row_number],
+			[x].[json_row_id],
+			[x].[value],
+			[x].[value_type]
 		FROM 
-			core
-	)
+			froms f 
+			INNER JOIN [#parts] x ON f.[node_id] + 1 = x.[node_id]
+	), 
+	[flattened] AS ( 
 
-	INSERT INTO [#translated_kvps] (
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
-	)
-	SELECT 
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
-	FROM 
-		[details];
-
-	-- collapse multi-row results back down to a single 'set'/row of results:
-	IF EXISTS (SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN 
-
-		WITH [flattened] AS ( 
-			SELECT 
-				x.[row_number], 
-				x.[json_row_id], 
-				x.[kvp_type],
-				x.[kvp_count], 
-				x.[current_kvp], 
-				x.[column], 
-				x.[value], 
-				x.[value_type], 
-				x.[sort_id]		
-			FROM 
-				[#translated_kvps] x
-				INNER JOIN [#raw_data] r ON [x].[row_number] = [r].[row_number]
-			WHERE 
-				r.[row_count] > 1
-		), 
-		[keys] AS ( 
-			SELECT 
-				*
-			FROM 
-				[flattened]
-			WHERE 
-				[flattened].[kvp_type] = N'key'
-
-		), 
-		[details] AS ( 
-			SELECT 
-				*
-			FROM 
-				[flattened]
-			WHERE 
-				[flattened].[kvp_type] = N'detail'
-		),
-		[collapsed] AS (
-			SELECT 
-				x.[row_number], 
-				f.[json_row_id], 
-				NULLIF(COALESCE(STUFF(
-					(
-						SELECT 
-							N',' + -- always include (for STUFF() call) - vs conditional include with STRING_AGG()). 
-							N'"' + [k].[column] + N'":' + 
-							CASE 
-								WHEN [k].[value_type] = 1 THEN N'"' + [k].[value] + N'"'
-								ELSE [k].[value]
-							END  
-						FROM 
-							[keys] [k]
-						WHERE 
-							[x].[row_number] = [k].[row_number] 
-							AND [f].[json_row_id] = [k].[json_row_id]
-						ORDER BY 
-							[k].[json_row_id], [k].[current_kvp], [k].[sort_id]
-						FOR XML PATH(''), TYPE
-					).value(N'.[1]', N'nvarchar(MAX)')
-				, 1, 1, N''), N''), N'') [key_data],
-				NULLIF(COALESCE(STUFF(
-					(
-						SELECT
-							N',' + 
-							N'"' + [d].[column] + N'":' + 
-							CASE 
-								WHEN [d].[value_type] = 1 THEN N'"' + [d].[value] + N'"'
-								ELSE [d].[value]
-							END
-						FROM 
-							[details] [d] 
-						WHERE 
-							[x].[row_number] = [d].[row_number] 
-							AND [f].[json_row_id] = [d].[json_row_id]		
-						ORDER BY 
-							[d].[json_row_id], [d].[current_kvp], [d].[sort_id]
-						FOR XML PATH(''), TYPE
-					).value(N'.[1]', N'nvarchar(MAX)')
-				, 1, 1, N''), N''), N'') [detail_data]
-			FROM 
-				[#raw_data] [x]
-				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
-			GROUP BY 
-				[x].[row_number], f.[json_row_id]
-		), 
-		[serialized] AS ( 
-			SELECT 
-				[x].[row_number], 
-				N'[' + NULLIF(COALESCE(STUFF(
-					(
-						SELECT 
-							N',' + 
-							N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}'
-						FROM 
-							[collapsed] [c] WHERE [c].[row_number] = [x].[row_number]
-						ORDER BY 
-							[c].[json_row_id]
-						FOR XML PATH(''), TYPE
-					).value(N'.[1]', N'nvarchar(MAX)')
-				, 1, 1, N''), N''), N'') + N']' [serialized]
-
-			FROM 
-				[#raw_data] [x] 
-			WHERE 
-				[x].[row_count] > 1
-		)
-
-		UPDATE [r] 
-		SET 
-			[r].[translated_multi_row] = [s].[serialized]
-		FROM 
-			[#raw_data] [r] 
-			INNER JOIN [serialized] [s] ON [r].[row_number] = [s].[row_number]	
-		WHERE 
-			[r].[row_count] > 1
-	END;
-
-	-- Serialize KVPs (ordered by row_number) down to JSON: 
-	WITH [row_numbers] AS (
 		SELECT 
-			[row_number] 
+			[f].[row_number],
+			[f].[json_row_id],
+			[f].[node_id],
+			N'"' + [f].[column_name] + N'":{"from":' + CASE WHEN [f].[value_type] = 1 THEN N'"' + [f].[value] + N'"' ELSE [f].[value] END + ',"to":' + CASE WHEN [t].[value_type] = 1 THEN N'"' + [t].[value] + N'"' ELSE [t].[value] END + N'}' [collapsed]
 		FROM 
-			[#raw_data]
-		WHERE 
-			[row_count] = 1
+			[froms] f 
+			INNER JOIN [tos] t ON f.[row_number] = t.[row_number] AND f.[json_row_id] = t.[json_row_id] AND f.[column_name] = t.[column_name]
+	), 
+	[aggregated] AS ( 
+		SELECT 
+			x.[row_number],
+			x.[json_row_id],
+			N'{' +
+				NULLIF(COALESCE(STUFF((SELECT N',' + f2.[collapsed] FROM [flattened] f2 WHERE [f2].[row_number] = x.[row_number] AND f2.[json_row_id] = x.[json_row_id] ORDER BY [f2].[row_number], [f2].[json_row_id], [f2].[node_id] FOR XML PATH(''), TYPE).value(N'.[1]', N'nvarchar(MAX)'), 1, 1, N''), N''), N'') + 
+			N'}' [detail]
+		FROM 
+			[flattened] x
 		GROUP BY 
-			[row_number]
-	), 
-	[keys] AS ( 
-		SELECT 
-			[x].[row_number], 
-			NULLIF(COALESCE(STUFF(
-				(
-					SELECT 
-						N',' + 
-						N'"' + [x2].[column] + N'":' +
-						CASE 
-							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
-							ELSE [x2].[value]
-						END 
-					FROM 
-						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
-					ORDER BY 
-						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH(''), TYPE
-				).value(N'.[1]', N'nvarchar(MAX)')
-			, 1, 1, N''), N''), N'') [key_data]
-
-		FROM 
-			[row_numbers] x
-
-	), 
-	[details] AS (
-		SELECT 
-			[x].[row_number], 
-			NULLIF(COALESCE(STUFF(
-				(
-					SELECT 
-						N',' + 
-						N'"' + [x2].[column] + N'":' +
-						CASE 
-							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
-							ELSE [x2].[value]
-						END
-					FROM 
-						[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
-					ORDER BY 
-						[x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id]
-					FOR XML PATH(''), TYPE
-				).value(N'.[1]', N'nvarchar(MAX)')
-			, 1, 1, N''), N''), N'') [detail_data]
-		FROM 
-			[row_numbers] x
+			x.[row_number], x.[json_row_id]
 	)
 
-	UPDATE [x] 
+	UPDATE x 
 	SET 
-		[x].[translated_change_key] = k.[key_data], 
-		[x].[translated_change_detail] = d.[detail_data]
+		[x].[translated_details] = a.[detail]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
+
+	/* Serialize Details (for non UPDATEs - they've already been handled above) */
+	WITH [flattened] AS ( 
+		SELECT 
+			[row_number], 
+			[json_row_id], 
+			[node_id],
+			N'"' + ISNULL([translated_column], [original_column]) + N'":' + CASE WHEN ISNULL([translated_value_type], [original_value_type]) = 1 THEN N'"' + ISNULL([translated_value], [original_value]) + N'"' ELSE ISNULL([translated_value], [original_value]) END [collapsed]
+		FROM 
+			[#nodes] 
+		WHERE 
+			[node_type] = N'detail'
+	), 
+	[aggregated] AS ( 
+		SELECT 
+			x.[row_number],
+			x.[json_row_id], 
+			N'{' + 
+				NULLIF(COALESCE(STUFF((SELECT N',' + f2.[collapsed] FROM [flattened] f2 WHERE [f2].[row_number] = x.[row_number] AND f2.[json_row_id] = x.[json_row_id] ORDER BY [f2].[row_number], [f2].[json_row_id], [f2].[node_id] FOR XML PATH(''), TYPE).value(N'.[1]', N'nvarchar(MAX)'), 1, 1, N''), N''), N'') + 
+			N'}' [detail]
+		FROM 
+			[flattened] x
+		GROUP BY 
+			x.[row_number],
+			x.[json_row_id]
+	)
+
+	UPDATE x 
+	SET 
+		[x].[translated_details] = a.[detail]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id]
+	WHERE 
+		x.[translated_details] IS NULL;
+
+	/* Serialized Keys */
+	WITH [flattened] AS (  
+		SELECT 
+			[row_number], 
+			[json_row_id], 
+			[node_id],
+			N'"' + ISNULL([translated_column], [original_column]) + N'":' + CASE WHEN ISNULL([translated_value_type], [original_value_type]) = 1 THEN N'"' + ISNULL([translated_value], [original_value]) + N'"' ELSE ISNULL([translated_value], [original_value]) END [collapsed]
+		FROM 
+			[#nodes] 
+		WHERE 
+			[node_type] = N'key'
+	),
+	[aggregated] AS ( 
+		SELECT 
+			x.[row_number],
+			x.[json_row_id], 
+			N'{' + 
+				--STRING_AGG([collapsed], N',') WITHIN GROUP (ORDER BY [row_number], [json_row_id], [node_id]) +
+				NULLIF(COALESCE(STUFF((SELECT N',' + f2.[collapsed] FROM [flattened] f2 WHERE [f2].[row_number] = x.[row_number] AND [f2].[json_row_id] = [x].[json_row_id] ORDER BY [f2].[row_number], [f2].[json_row_id], [f2].[node_id] FOR XML PATH(''), TYPE).value(N'.[1]', N'nvarchar(MAX)'), 1, 1, N''), N''), N'') + 
+			N'}' [keys]
+		FROM 
+			[flattened] x
+		GROUP BY 
+			x.[row_number],
+			x.[json_row_id]			
+	)
+
+	UPDATE x 
+	SET 
+		x.[translate_keys] = a.[keys]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
+
+	/* MAP translated JSON back to #raw_data - starting with scalar rows, then move to multi-row JSON ... */
+	UPDATE x 
+	SET 
+	 	x.[translated_json] = N'[{"key":[' + s.[translate_keys] + N'],"detail":[' + s.[translated_details] + N']}]'
 	FROM 
 		[#raw_data] x 
-		INNER JOIN [keys] k ON [x].[row_number] = [k].[row_number]
-		INNER JOIN [details] d ON [x].[row_number] = [d].[row_number]
+		INNER JOIN [#scalar] s ON [x].[row_number] = [s].[row_number]
 	WHERE 
-		x.row_count = 1;
+		x.[row_count] = 1;
 
-Final_Projection:
+	WITH [flattened] AS ( 
+		SELECT 
+			x.[row_number], 
+			N'[' +
+				NULLIF(COALESCE(STUFF((SELECT N',{"key":[' + x2.[translate_keys] + N'],"detail":[' + x2.[translated_details] + N']}' FROM [#scalar] x2 WHERE x.[row_number] = x2.[row_number] ORDER BY [x2].[row_number], [x2].[json_row_id] FOR XML PATH(''), TYPE).value(N'.[1]', N'nvarchar(MAX)'), 1, 1, N''), N''), N'') + 
+			N']' [collapsed]
+		FROM 
+			[#scalar] x
+		WHERE 
+			x.[row_count] > 1
+		GROUP BY 
+			x.[row_number]
+	) 
+
+	UPDATE x 
+	SET 
+		x.[translated_json] = f.[collapsed]
+	FROM 
+		[#raw_data] x 
+		INNER JOIN [flattened] f ON [x].[row_number] = [f].[row_number] 
+	WHERE 
+		x.[translated_json] IS NULL;
+
+Final_Projection: 
 	SELECT 
 		[row_number],
 		[total_rows],
@@ -895,11 +875,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE 
-			WHEN [translated_change_key] IS NOT NULL THEN N'[{"key":[{' + [translated_change_key] + N'}],"detail":[{' + [translated_change_detail] + N'}]}]'
-			WHEN [translated_multi_row] IS NOT NULL THEN [translated_multi_row] -- this and translated_change_key won't ever BOTH be populated (only one OR the other).
-			ELSE [change_details]
-		END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE [translated_json] END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
@@ -924,8 +900,8 @@ ALTER PROC dda.[get_audit_data]
 	@FromIndex					int				= 1, 
 	@ToIndex					int				= 100
 AS
-    SET NOCOUNT ON; 
-
+    SET NOCOUNT ON;
+	
 	-- {copyright}
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
@@ -949,14 +925,14 @@ AS
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
 		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either specify a single @StartAuditID/@StartTransactionID OR @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables - or a combination of time, table, and user constraints.', 16, 1);
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
 
 	IF @StartTime IS NOT NULL BEGIN 
 		IF @StartTime > @EndTime BEGIN
-			RAISERROR('@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
+			RAISERROR(N'@StartTime may not be > @EndTime - please check inputs and try again.', 16, 1);
 			RETURN -12;
 		END;
 	END;
@@ -1137,14 +1113,9 @@ FOR JSON PATH);
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
 		[change_details] nvarchar(max) NULL, 
-		[translated_change_key] nvarchar(MAX) NULL, 
-		[translated_change_detail] nvarchar(MAX) NULL, 
-		[translated_multi_row] nvarchar(MAX) NULL
+		[translated_json] nvarchar(MAX) NULL
 	);
 
-	-- NOTE: INSERT + EXEC (dynamic-SQL with everything needed from dda.audits in a single 'gulp') would make more sense here. 
-	--		BUT, INSERT + EXEC causes dreaded "INSERT EXEC can't be nested..." error if/when UNIT tests are used to test this code. 
-	--			So, this 'hack' of grabbing JSON (dynamically), shredding it, and JOINing 'back' to dda.audits... exists below):
 	INSERT INTO [#raw_data] (
 		[x].[row_number],
 		[x].[total_rows],
@@ -1174,190 +1145,310 @@ FOR JSON PATH);
 
 	SELECT @matchedRows = @@ROWCOUNT;
 
-	-- short-circuit options for transforms:
+	/* Short-circuit options for transforms: */
 	IF (@matchedRows < 1) OR (@TransformOutput <> 1) GOTO Final_Projection;
 
-	-- table translations: 
+	/* Translate table-names: */
 	UPDATE x 
 	SET 
 		[x].[translated_table] = CASE WHEN t.[translated_name] IS NULL THEN x.[table] ELSE t.[translated_name] END
 	FROM 
 		[#raw_data] x 
 		LEFT OUTER JOIN [dda].[translation_tables] t ON x.[table] = t.[table_name];
-		
-	CREATE TABLE [#key_value_pairs] ( 
-		[kvp_id] int IDENTITY(1,1) NOT NULL, 
-		[kvp_type] sysname NOT NULL, 
-		[row_number] int NOT NULL,
-		[json_row_id] int NOT NULL DEFAULT 0,  -- for 'multi-row' ... rows. 
-		[table] sysname NOT NULL, 
-		[column] sysname NOT NULL, 
-		[translated_column] sysname NULL, 
-		[value] nvarchar(MAX) NULL, 
-		[value_type] int NOT  NULL,
-		[translated_value] sysname NULL, 
-		[from_value] nvarchar(MAX) NULL, 
-		[translated_from_value] sysname NULL, 
-		[to_value] nvarchar(MAX) NULL, 
-		[translated_to_value] sysname NULL, 
-		[translated_update_value] nvarchar(MAX) NULL
+
+	CREATE TABLE #scalar ( 
+		[scalar_id] int IDENTITY(1,1) NOT NULL, 
+		[audit_id] int NOT NULL, 
+		[operation_type] char(6) NOT NULL,
+		[row_count] int NOT NULL,
+		[row_number] int NOT NULL, 
+		[json_row_id] int NOT NULL, 
+		[source_table] sysname NOT NULL, 
+		[change_details] nvarchar(MAX) NOT NULL, 
+		[translate_keys] nvarchar(MAX) NULL, 
+		[translated_details] nvarchar(MAX) NULL
 	);
 
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
+	WITH distinct_json_rows AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_count],
+			[x].[row_number], 
+			[r].[Key] [json_row_id], 
+			[x].[table], 
+			N'[' + [r].[Value] + N']' [change_details]  /* NOTE: without [surrounding brackets], shred no-worky down below... */
+		FROM 
+			[#raw_data] x 
+			CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r 
+		WHERE 
+			[x].[row_count] > 1
+	) 
+
+	INSERT INTO [#scalar] (
+		[audit_id],
+		[operation_type],
+		[row_count],
 		[row_number],
-		[column],
-		[value],
-		[value_type]
+		[json_row_id],
+		[source_table],
+		[change_details]
 	)
 	SELECT 
-		N'key' [kvp_type],
-		[x].[table], 
-		[x].[row_number],
-		[y].[Key] [column], 
-		[y].[Value] [value],
-		[y].[Type] [value_type]
-	FROM 
-		[#raw_data] x
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].key'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
-	WHERE 
-		x.[row_count] = 1
-		AND y.[Key] IS NOT NULL 
-		AND y.[Value] IS NOT NULL;
-
-	INSERT INTO [#key_value_pairs] (
-		[kvp_type],
-		[table],
+		[audit_id],
+		[operation_type],
+		[row_count],
 		[row_number],
-		[column],
-		[value],
-		[value_type]
+		[json_row_id],
+		[table],
+		[change_details]
+	FROM 
+		[distinct_json_rows]
+
+	INSERT INTO [#scalar] (
+		[audit_id],
+		[operation_type],
+		[row_count],
+		[row_number],
+		[json_row_id],
+		[source_table],
+		[change_details]
 	)
 	SELECT 
-		N'detail' [kvp_type],
-		[x].[table], 
-		[x].[row_number],
-		[y].[Key] [column], 
-		[y].[Value] [value],
-		[y].[Type] [value_type]
+		[audit_id],
+		[operation_type],
+		1 [row_count], 
+		[row_number],
+		0 [json_row_id],
+		[table],
+		[change_details]
 	FROM 
-		[#raw_data] x 
-		OUTER APPLY OPENJSON(JSON_QUERY(x.[change_details], '$[0].detail'), '$') z
-		CROSS APPLY OPENJSON(z.[Value], N'$') y
+		[#raw_data]
+	WHERE
+		[row_count] = 1;
+
+	CREATE TABLE [#nodes] ( 
+		[node_id] int IDENTITY(1,1) NOT NULL, 
+		[audit_id] int NOT NULL,
+		[operation_type] char(6) NOT NULL,
+		[row_number] int NOT NULL, 
+		[json_row_id] int NOT NULL,
+		[node_type] sysname NOT NULL,
+		[source_table] sysname NOT NULL, 
+		[parent_json] nvarchar(MAX) NOT NULL,
+		[current_json] nvarchar(MAX) NULL,
+		[original_column] sysname NOT NULL, 
+		[original_value] nvarchar(MAX) NULL, 
+		[original_value_type] int NOT NULL, 
+		[translated_value] nvarchar(MAX) NULL, 
+		[translated_column] sysname NULL, 
+		[translated_value_type] int NULL 
+	);
+
+	WITH [keys] AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_number],
+			[x].[json_row_id],
+			N'key' [node_type],
+			[x].[source_table],
+			[x].[change_details] [parent_json],
+			[z].[Value] [current_json],
+			[y].[Key] [original_column],
+			ISNULL([y].[Value], N'null') [original_value],
+			[y].[Type] [original_value_type]
+		FROM 
+			[#scalar] x 
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].key'), N'$') z 
+			CROSS APPLY OPENJSON([z].[Value], N'$') y
+	)
+
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[keys];
+	
+	WITH [details] AS ( 
+		SELECT 
+			[x].[audit_id],
+			[x].[operation_type],
+			[x].[row_number],
+			[x].[json_row_id],
+			N'detail' [node_type],
+			[x].[source_table],
+			[x].[change_details] [parent_json],
+			[z].[Value] [current_json],
+			[y].[Key] [original_column],
+			ISNULL([y].[Value], N'null') [original_value],
+			[y].[Type] [original_value_type]
+		FROM 
+			[#scalar] x 
+			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].detail'), N'$') z 
+			CROSS APPLY OPENJSON([z].[Value], N'$') y
+		WHERE 
+			[y].[Value] NOT LIKE '%from":%"to":%'
+	) 
+
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[details];
+
+	/* Extract from/to child nodes for UPDATES: */
+	SELECT 
+		[x].[audit_id],
+		[x].[operation_type],
+		[x].[row_number],
+		[x].[json_row_id],
+		N'detail' [node_type],
+		[x].[source_table],
+		[x].[change_details] [parent_json],
+		[z].[Value] [current_json],
+		[y].[Key] [original_column],
+		ISNULL([y].[Value], N'null') [original_value],
+		[y].[Type] [original_value_type]
+	INTO 
+		#updates
+	FROM 
+		[#scalar] x 
+		OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$[0].detail'), N'$') z 
+		CROSS APPLY OPENJSON([z].[Value], N'$') y
 	WHERE 
-		x.[row_count] = 1
-		AND y.[Key] IS NOT NULL
-		AND y.[Value] IS NOT NULL;
+		[y].[Type] = 5 AND
+		[y].[Value] LIKE '%from":%"to":%';
 
-	IF EXISTS(SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN
+	WITH [from_to] AS ( 
 
-		WITH [row_keys] AS ( 
-			SELECT 
-				[x].[table], 
-				[x].[row_number],
-				[r].[Key] [json_row_id], 
-				[r].[Value] [change_details]
-			FROM 
-				[#raw_data] x 
-				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
-			WHERE 
-				x.[row_count] > 1
-		)
-
-		INSERT INTO [#key_value_pairs] (
-			[kvp_type],
-			[table],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		)
 		SELECT 
-			N'key' [kvp_type], 
-			[x].[table], 
+			[x].[audit_id],
+			[x].[operation_type],
 			[x].[row_number],
-			[x].[json_row_id], 
-			[y].[Key] [column], 
-			[y].[Value] [value],
-			[y].[Type] [value_type]
+			[x].[json_row_id],
+			[y].[Key] [node_type],
+			[x].[source_table],
+			[x].[parent_json],
+			[x].[current_json],
+			[x].[original_column],
+			ISNULL([y].[Value], N'null') [original_value], 
+			[y].[Type] [original_value_type]
 		FROM 
-			[row_keys] x
-			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.key'), '$') z
-			CROSS APPLY OPENJSON(z.[Value], N'$') y;
+			[#updates] x
+			CROSS APPLY OPENJSON([x].[original_value], N'$') y
+	)
 
-		-- ditto, for details:
-		WITH [row_details] AS ( 
-			SELECT 
-				[x].[table], 
-				[x].[row_number],
-				[r].[Key] [json_row_id], 
-				[r].[Value] [change_details]
-			FROM 
-				[#raw_data] x 
-				CROSS APPLY OPENJSON(JSON_QUERY([x].[change_details], N'$')) r
-			WHERE 
-				x.[row_count] > 1
-		)
-
-		INSERT INTO [#key_value_pairs] (
-			[kvp_type],
-			[table],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		)
-		SELECT 
-			N'detail' [kvp_type], 
-			[x].[table], 
-			[x].[row_number],
-			[x].[json_row_id], 
-			[y].[Key] [column], 
-			[y].[Value] [value],
-			[y].[Type] [value_type]
-		FROM 
-			[row_details] x
-			OUTER APPLY OPENJSON(JSON_QUERY([x].[change_details], '$.detail'), '$') z
-			CROSS APPLY OPENJSON(z.[Value], N'$') y;
-	END;
-
-	UPDATE [#key_value_pairs] 
+	INSERT INTO [#nodes] (
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type]
+	)
+	SELECT 
+		[audit_id],
+		[operation_type],
+		[row_number],
+		[json_row_id],
+		[node_type],
+		[source_table],
+		[parent_json],
+		[current_json],
+		[original_column],
+		[original_value],
+		[original_value_type] 
+	FROM 
+		[from_to];	
+	
+	/* Translate Column Names: */
+	UPDATE x 
 	SET 
-		[from_value] = ISNULL(JSON_VALUE([value], N'$.from'), N'null'), 
-		[to_value] = ISNULL(JSON_VALUE([value], N'$.to'), N'null')
+		x.[translated_column] = [c].[translated_name]
+	FROM 
+		[#nodes] x 
+		LEFT OUTER JOIN dda.[translation_columns] c ON [x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[table_name] AND [x].[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[column_name]
 	WHERE 
-		ISJSON([value]) = 1 AND [value] LIKE '%from":%"to":%';
+		x.[translated_column] IS NULL; 
 
-	-- address translation_keys: 
-	IF EXISTS (SELECT NULL FROM [#key_value_pairs] kvp LEFT OUTER JOIN [dda].[translation_keys] tk ON [kvp].[table] = tk.[table_name] AND kvp.[column] = tk.[column_name] WHERE tk.[table_name] IS NOT NULL) BEGIN
-		
-		CREATE TABLE #translation_key_values (
-			row_id int IDENTITY(1,1) NOT NULL, 
-			source_table sysname NOT NULL, 
-			source_column sysname NOT NULL, 
-			translation_key nvarchar(MAX) NOT NULL, 
-			translation_value nvarchar(MAX) NOT NULL
-		);
-			
+
+	CREATE TABLE #translation_key_values (
+		[row_id] int IDENTITY(1,1) NOT NULL, 
+		[source_table] sysname NOT NULL, 
+		[source_column] sysname NOT NULL, 
+		[translation_key] nvarchar(MAX) NOT NULL, 
+		[translation_value] nvarchar(MAX) NOT NULL, 
+		[target_json_type] tinyint NULL,
+		[weight] int NOT NULL DEFAULT (1)
+	);	
+
+	IF EXISTS (SELECT NULL FROM [#nodes] n LEFT OUTER JOIN dda.[translation_keys] tk ON [n].[source_table] = [tk].[table_name] AND [n].[original_column] = [tk].[column_name] WHERE [tk].[table_name] IS NOT NULL) BEGIN 
+
 		DECLARE @sourceTable sysname, @sourceColumn sysname, @translationTable sysname, @translationKey nvarchar(MAX), @translationValue nvarchar(MAX);
 		DECLARE @translationSql nvarchar(MAX);
 
 		DECLARE [translator] CURSOR LOCAL FAST_FORWARD FOR 
 		SELECT DISTINCT
-			tk.[table_name], 
-			tk.[column_name], 
-			tk.[key_table],
-			tk.[key_column], 
-			tk.[value_column]
+			[tk].[table_name], 
+			[tk].[column_name], 
+			[tk].[key_table],
+			[tk].[key_column], 
+			[tk].[value_column]
 		FROM 
 			dda.[translation_keys] tk	
-			LEFT OUTER JOIN [#key_value_pairs] x ON tk.[table_name] = x.[table] AND tk.[column_name] = x.[column]
+			LEFT OUTER JOIN [#nodes] x ON [tk].[table_name] = [x].[source_table] AND [tk].[column_name] = [x].[original_column]
 		WHERE 
-			x.[table] IS NOT NULL AND x.[column] IS NOT NULL;
+			[x].[source_table] IS NOT NULL AND [x].[original_column] IS NOT NULL;
 				
 		OPEN [translator];
 		FETCH NEXT FROM [translator] INTO @sourceTable, @sourceColumn, @translationTable, @translationKey, @translationValue;
@@ -1381,370 +1472,244 @@ FOR JSON PATH);
 		CLOSE [translator];
 		DEALLOCATE [translator];
 
-		-- map INSERT/DELETE translations:
-		UPDATE x 
-		SET 
-			x.[translated_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
-
-		-- map FROM / TO translations:
-		UPDATE x 
-		SET
-			x.[translated_from_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-				AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-		WHERE 
-			[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-		UPDATE x 
-		SET
-			x.[translated_to_value] = v.[translation_value]
-		FROM 
-			[#key_value_pairs] x 
-			LEFT OUTER JOIN #translation_key_values v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_table] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
-				AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key] COLLATE SQL_Latin1_General_CP1_CI_AS
-		WHERE 
-			[to_value] IS NOT NULL; -- ditto... 
 	END;
 
-	UPDATE x 
-	SET 
-		x.[translated_column] = c.[translated_name], 
-		x.[translated_value] = ISNULL(v.[translation_value], x.[translated_value])
+	INSERT INTO [#translation_key_values] (
+		[source_table],
+		[source_column],
+		[translation_key],
+		[translation_value], 
+		[target_json_type],
+		[weight]
+	)
+	SELECT DISTINCT /*  TODO: tired... not sure why I'm tolerating this code-smell/nastiness - but need to address it... */
+		v.[table_name] [source_table], 
+		v.[column_name] [source_column], 
+		v.[key_value] [translation_key],
+		v.[translation_value], 
+		v.[target_json_type],
+		2 [weight]
 	FROM 
-		[#key_value_pairs] x
-		LEFT OUTER JOIN dda.[translation_columns] c ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = c.[column_name]
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-			AND x.[value] NOT LIKE N'{"from":%"to":%';
+		[#nodes] x 
+		INNER JOIN [dda].[translation_values] v ON x.[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name];
 
-	-- Stage from/to value translations:
-	UPDATE x 
-	SET
-		x.[translated_from_value] = ISNULL(v.[translation_value], x.[translated_from_value])
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[from_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[from_value] IS NOT NULL; -- only bother executing UPDATEs vs FROM/TO (UPDATE) values.
-
-	UPDATE x 
-	SET
-		x.[translated_to_value] = ISNULL(v.[translation_value], x.[translated_to_value])
-	FROM 
-		[#key_value_pairs] x 
-		LEFT OUTER JOIN dda.[translation_values] v ON x.[table] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[table_name] AND x.[column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[column_name] 
-			AND x.[to_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[key_value] COLLATE SQL_Latin1_General_CP1_CI_AS
-	WHERE 
-		[to_value] IS NOT NULL; -- ditto... 
-
-	-- Serialize from/to values (UPDATE summaries) back down to JSON:
-	UPDATE [#key_value_pairs] 
-	SET 
-		[translated_update_value] = N'{"from":' + CASE 
-				WHEN dda.[get_json_data_type](ISNULL([translated_from_value], [from_value])) = 1 THEN N'"' + ISNULL([translated_from_value], [from_value]) + N'"'
-				ELSE ISNULL([translated_from_value], [from_value])
-			END + N',"to":' + CASE 
-				WHEN dda.[get_json_data_type](ISNULL([translated_to_value], [to_value])) = 1 THEN N'"' + ISNULL([translated_to_value], [to_value]) + N'"'
-				ELSE + ISNULL([translated_to_value], [to_value])
-			END + N'}'
-	WHERE 
-		[translated_from_value] IS NOT NULL 
-		OR 
-		[translated_to_value] IS NOT NULL;
-
-	-- Collapse translations + non-translations down to a single working set: 
-	WITH core AS ( 
-		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
-			[kvp_type], 
-			[row_number], 
-			[json_row_id],
-			ISNULL([translated_column], [column]) [column], 
-			CASE 
-				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
-				ELSE ISNULL([translated_value], [value])
-			END [value], 
-			[value_type]
+	/* Explicit values in dda.translation_values can/will/should OVERWRITE any mappings or translations provided by FKs defined in dda.translation_keys - so remove lower-ranked duplicates: */
+	WITH duplicates AS ( 
+		SELECT
+			row_id
 		FROM 
-			[#key_value_pairs]
-		WHERE 
-			[kvp_type] = N'key'
-	), 
-	[keys] AS (
-		SELECT 
-			[sort_id],
-			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
-			[row_number],
-			[json_row_id],
-			[column],
-			[value],
-			[value_type]
-		FROM 
-			core
+			[#translation_key_values] t1 
+			WHERE EXISTS ( 
+				SELECT NULL 
+				FROM [#translation_key_values] t2 
+				WHERE 
+					t1.[source_table] = t2.[source_table]
+					AND t1.[source_column] = t2.[source_column]
+					AND t1.[translation_key] = t2.[translation_key]
+				GROUP BY 
+					t2.[source_table], t2.[source_column], t2.[translation_key]
+				HAVING 
+					COUNT(*) > 1 
+					AND MAX(t2.[weight]) > t1.[weight]
+			)
 	)
 
+	DELETE x 
+	FROM 
+		[#translation_key_values] x 
+		INNER JOIN [duplicates] d ON [x].[row_id] = [d].[row_id];
+
+	IF EXISTS (SELECT NULL FROM [#translation_key_values]) BEGIN 
+		UPDATE x 
+		SET 
+			x.[translated_value] = v.[translation_value], 
+			x.[translated_value_type] = CASE WHEN v.[target_json_type] IS NOT NULL THEN [v].[target_json_type] ELSE dda.[get_json_data_type](v.[translation_value]) END
+		FROM 
+			[#nodes] x 
+			INNER JOIN [#translation_key_values] v ON 
+				[x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [v].[source_table] 
+				AND x.[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[source_column] 
+				AND x.[original_value] COLLATE SQL_Latin1_General_CP1_CI_AS = v.[translation_key];
+	END;
+
+	/* RE-ASSEMBLY */
+
+	/* Start with from-to values and translations: */
 	SELECT 
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
+		ISNULL([translated_column], [original_column]) [column_name], 
+		LEAD(ISNULL([translated_column], [original_column]), 1, NULL) OVER(PARTITION BY [row_number], [json_row_id] ORDER BY [node_id]) [next_column_name],
+		[row_number], 
+		[json_row_id], 
+		[node_type],
+		ISNULL([translated_value], [original_value]) [value], 
+		ISNULL([translated_value_type], [original_value_type]) [value_type], 
+		[node_id]
 	INTO 
-		#translated_kvps
+		#parts
 	FROM 
-		keys;
-		
-	WITH core AS ( 
-		SELECT 
-			ROW_NUMBER() OVER (ORDER BY [kvp_id]) [sort_id],
-			[kvp_type], 
-			[row_number], 
-			[json_row_id],
-			[table], 
-			ISNULL([translated_column], [column]) [column], 
-			CASE 
-				WHEN [value_type] = 5 THEN ISNULL([translated_update_value], [value])
-				ELSE ISNULL([translated_value], [value])
-			END [value], 
-			[value_type]
-		FROM 
-			[#key_value_pairs]
-		WHERE 
-			[kvp_type] = N'detail'
+		[#nodes]
+	WHERE 
+		[node_type] IN (N'from', N'to');
 
-	), 
-	[details] AS (
+	WITH [froms] AS ( 
 		SELECT 
-			[sort_id],
-			[kvp_type],
-			COUNT(*) OVER (PARTITION BY [row_number], [json_row_id]) [kvp_count], 
-			ROW_NUMBER() OVER (PARTITION BY [row_number], [json_row_id] ORDER BY [sort_id]) [current_kvp],
+			[x].[column_name],
+			[x].[row_number],
+			[x].[json_row_id],
+			[x].[value],
+			[x].[value_type],
+			[x].[node_id] 
+		FROM 
+			[#parts] x
+		WHERE 
+			[node_type] = N'from'
+	), 
+	[tos] AS ( 
+		SELECT 
+			[x].[column_name],
+			[x].[row_number],
+			[x].[json_row_id],
+			[x].[value],
+			[x].[value_type]
+		FROM 
+			froms f 
+			INNER JOIN [#parts] x ON f.[node_id] + 1 = x.[node_id]
+	), 
+	[flattened] AS ( 
+
+		SELECT 
+			[f].[row_number],
+			[f].[json_row_id],
+			[f].[node_id],
+			N'"' + [f].[column_name] + N'":{"from":' + CASE WHEN [f].[value_type] = 1 THEN N'"' + [f].[value] + N'"' ELSE [f].[value] END + ',"to":' + CASE WHEN [t].[value_type] = 1 THEN N'"' + [t].[value] + N'"' ELSE [t].[value] END + N'}' [collapsed]
+		FROM 
+			[froms] f 
+			INNER JOIN [tos] t ON f.[row_number] = t.[row_number] AND f.[json_row_id] = t.[json_row_id] AND f.[column_name] = t.[column_name]
+	), 
+	[aggregated] AS ( 
+		SELECT 
 			[row_number],
 			[json_row_id],
-			[column],
-			[value],
-			[value_type]
+			N'{' +
+				STRING_AGG([collapsed], N',') WITHIN GROUP (ORDER BY [row_number], [json_row_id], [node_id]) +
+			N'}' [detail]
 		FROM 
-			core
-	)
-
-	INSERT INTO [#translated_kvps] (
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
-	)
-	SELECT 
-		[sort_id],
-		[row_number],
-		[json_row_id],
-		[kvp_type],
-		[kvp_count],
-		[current_kvp],
-		[column],
-		[value],
-		[value_type]
-	FROM 
-		[details];
-
-	-- collapse multi-row results back down to a single 'set'/row of results:
-	IF EXISTS (SELECT NULL FROM [#raw_data] WHERE [row_count] > 1) BEGIN 
-
-		WITH [flattened] AS ( 
-			SELECT 
-				x.[row_number], 
-				x.[json_row_id], 
-				x.[kvp_type],
-				x.[kvp_count], 
-				x.[current_kvp], 
-				x.[column], 
-				x.[value], 
-				x.[value_type], 
-				x.[sort_id]		
-			FROM 
-				[#translated_kvps] x
-				INNER JOIN [#raw_data] r ON [x].[row_number] = [r].[row_number]
-			WHERE 
-				r.[row_count] > 1
-		), 
-		[keys] AS ( 
-			SELECT 
-				*
-			FROM 
-				[flattened]
-			WHERE 
-				[flattened].[kvp_type] = N'key'
-
-		), 
-		[details] AS ( 
-			SELECT 
-				*
-			FROM 
-				[flattened]
-			WHERE 
-				[flattened].[kvp_type] = N'detail'
-		),
-		[collapsed] AS (
-			SELECT 
-				x.[row_number], 
-				f.[json_row_id], 
-				(
-					SELECT
-						STRING_AGG(
-							N'"' + [k].[column] + N'":' + 
-							CASE 
-								WHEN [k].[value_type] = 1 THEN N'"' + [k].[value] + N'"'
-								ELSE [k].[value]
-							END + 
-							CASE 
-								WHEN [k].[current_kvp] = [k].[kvp_count] THEN N''
-								ELSE N','
-							END
-						, '') WITHIN GROUP (ORDER BY [k].[json_row_id], [k].[current_kvp], [k].[sort_id])
-					FROM 
-						[keys] [k]
-					WHERE 
-						[x].[row_number] = [k].[row_number] 
-						AND [f].[json_row_id] = [k].[json_row_id]
-				) [key_data], 
-				(
-					SELECT 
-						STRING_AGG(
-							N'"' + [d].[column] + N'":' + 
-							CASE 
-								WHEN [d].[value_type] = 1 THEN N'"' + [d].[value] + N'"'
-								ELSE [d].[value]
-							END + 
-							CASE 
-								WHEN [d].[current_kvp] = [d].[kvp_count] THEN N''
-								ELSE N','
-							END
-						, '') WITHIN GROUP (ORDER BY [d].[json_row_id], [d].[current_kvp], [d].[sort_id])
-					FROM 
-						[details] [d] 
-					WHERE 
-						[x].[row_number] = [d].[row_number] 
-						AND [f].[json_row_id] = [d].[json_row_id]
-				) [detail_data]
-			FROM 
-				[#raw_data] [x]
-				INNER JOIN [flattened] f ON [x].[row_number] = f.[row_number]
-			GROUP BY 
-				[x].[row_number], f.[json_row_id]
-		),
-		[serialized] AS ( 
-			SELECT 
-				[x].[row_number], 
-				N'[' + (
-					SELECT 
-						STRING_AGG(N'{"key": [{' + [c].[key_data] + N'}],"detail":[{' + [c].[detail_data] + N'}]}', ',') WITHIN GROUP (ORDER BY [c].[json_row_id])
-						FROM [collapsed] [c] WHERE c.[row_number] = x.[row_number]
-				) + N']' [serialized]
-			FROM 
-				[#raw_data] [x] 
-			WHERE 
-				[x].[row_count] > 1
-		)
-
-		UPDATE [r] 
-		SET 
-			[r].[translated_multi_row] = [s].[serialized]
-		FROM 
-			[#raw_data] [r] 
-			INNER JOIN [serialized] [s] ON [r].[row_number] = [s].[row_number]	
-		WHERE 
-			[r].[row_count] > 1
-	END;
-
-	-- Serialize KVPs (ordered by row_number) down to JSON: 
-	WITH [row_numbers] AS (
-		SELECT 
-			[row_number] 
-		FROM 
-			[#raw_data]
-		WHERE 
-			[row_count] = 1
+			[flattened]
 		GROUP BY 
-			[row_number]
-	), 
-	[keys] AS ( 
-		SELECT 
-			[x].[row_number], 
-			(
-				SELECT 
-					STRING_AGG(
-						N'"' + [x2].[column] + N'":' +
-						CASE 
-							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
-							ELSE [x2].[value]
-						END + 
-						CASE 
-							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
-							ELSE N','
-						END
-					, '') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
-				FROM 
-					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'key'
-			) [key_data]
-		FROM 
-			[row_numbers] x
-
-	), 
-	[details] AS (
-		SELECT 
-			[x].[row_number], 
-			( 
-				SELECT 
-					STRING_AGG(
-						N'"' + [x2].[column] + N'":' +
-						CASE 
-							WHEN [x2].[value_type] = 1 THEN N'"' + [x2].[value] + N'"'
-							ELSE [x2].[value]
-						END + 
-						CASE 
-							WHEN [x2].[current_kvp] = [x2].[kvp_count] THEN N''
-							ELSE N','
-						END
-					, '') WITHIN GROUP (ORDER BY [x2].[json_row_id], [x2].[current_kvp], [x2].[sort_id])
-
-				FROM 
-					[#translated_kvps] x2 WHERE [x].[row_number] = [x2].[row_number] AND [x2].[kvp_type] = N'detail'
-			) [detail_data]
-		FROM 
-			[row_numbers] x
+			[row_number], [json_row_id]
 	)
 
-	UPDATE [x] 
+	UPDATE x 
 	SET 
-		[x].[translated_change_key] = k.[key_data], 
-		[x].[translated_change_detail] = d.[detail_data]
+		[x].[translated_details] = a.[detail]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
+
+
+	/* Serialize Details (for non UPDATEs - they've already been handled above) */
+	WITH [flattened] AS ( 
+		SELECT 
+			[row_number], 
+			[json_row_id], 
+			[node_id],
+			N'"' + ISNULL([translated_column], [original_column]) + N'":' + CASE WHEN ISNULL([translated_value_type], [original_value_type]) = 1 THEN N'"' + ISNULL([translated_value], [original_value]) + N'"' ELSE ISNULL([translated_value], [original_value]) END [collapsed]
+		FROM 
+			[#nodes] 
+		WHERE 
+			[node_type] = N'detail'
+	), 
+	[aggregated] AS ( 
+		SELECT 
+			[row_number],
+			[json_row_id], 
+			N'{' + 
+				STRING_AGG([collapsed], N',') WITHIN GROUP (ORDER BY [row_number], [json_row_id], [node_id]) +
+			N'}' [detail]
+		FROM 
+			[flattened]
+		GROUP BY 
+			[row_number],
+			[json_row_id]
+
+	)
+
+	UPDATE x 
+	SET 
+		[x].[translated_details] = a.[detail]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id]
+	WHERE 
+		x.[translated_details] IS NULL;
+
+	/* Serialized Keys */
+	WITH [flattened] AS (  
+		SELECT 
+			[row_number], 
+			[json_row_id], 
+			[node_id],
+			N'"' + ISNULL([translated_column], [original_column]) + N'":' + CASE WHEN ISNULL([translated_value_type], [original_value_type]) = 1 THEN N'"' + ISNULL([translated_value], [original_value]) + N'"' ELSE ISNULL([translated_value], [original_value]) END [collapsed]
+		FROM 
+			[#nodes] 
+		WHERE 
+			[node_type] = N'key'
+	),
+	[aggregated] AS ( 
+		SELECT 
+			[row_number],
+			[json_row_id], 
+			N'{' + 
+				STRING_AGG([collapsed], N',') WITHIN GROUP (ORDER BY [row_number], [json_row_id], [node_id]) +
+			N'}' [keys]
+		FROM 
+			flattened 
+		GROUP BY 
+			[row_number],
+			[json_row_id]			
+	)
+
+	UPDATE x 
+	SET 
+		x.[translate_keys] = a.[keys]
+	FROM 
+		[#scalar] x 
+		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
+
+	/* MAP translated JSON back to #raw_data - starting with scalar rows, then move to multi-row JSON ... */
+	UPDATE x 
+	SET 
+	 	x.[translated_json] = N'[{"key":[' + s.[translate_keys] + N'],"detail":[' + s.[translated_details] + N']}]'
 	FROM 
 		[#raw_data] x 
-		INNER JOIN [keys] k ON [x].[row_number] = [k].[row_number]
-		INNER JOIN [details] d ON [x].[row_number] = [d].[row_number]
+		INNER JOIN [#scalar] s ON [x].[row_number] = [s].[row_number]
 	WHERE 
-		x.row_count = 1;
+		x.[row_count] = 1;
 
-Final_Projection:
+	WITH [flattened] AS ( 
+		SELECT 
+			[row_number], 
+			N'[' +
+				STRING_AGG(N'{"key":[' + [translate_keys] + N'],"detail":[' + [translated_details] + N']}', N',') WITHIN GROUP(ORDER BY [row_number], [json_row_id]) + 
+			N']' [collapsed]
+		FROM 
+			[#scalar] 
+		WHERE 
+			[row_count] > 1
+		GROUP BY 
+			[row_number]
+	) 
+
+	UPDATE x 
+	SET 
+		x.[translated_json] = f.[collapsed]
+	FROM 
+		[#raw_data] x 
+		INNER JOIN [flattened] f ON [x].[row_number] = [f].[row_number] 
+	WHERE 
+		x.[translated_json] IS NULL;
+
+Final_Projection: 
 	SELECT 
 		[row_number],
 		[total_rows],
@@ -1755,11 +1720,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE 
-			WHEN [translated_change_key] IS NOT NULL THEN N'[{"key":[{' + [translated_change_key] + N'}],"detail":[{' + [translated_change_detail] + N'}]}]'
-			WHEN [translated_multi_row] IS NOT NULL THEN [translated_multi_row] -- this and translated_change_key won't ever BOTH be populated (only one OR the other).
-			ELSE [change_details]
-		END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE [translated_json] END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
