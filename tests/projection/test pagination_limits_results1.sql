@@ -1,9 +1,4 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+
 ALTER PROCEDURE [projection].[test pagination_limits_results]
 AS
 BEGIN

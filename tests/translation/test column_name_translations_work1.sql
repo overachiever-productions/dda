@@ -1,9 +1,4 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
+
 ALTER PROCEDURE [translation].[test column_name_translations_work]
 AS
 BEGIN
