@@ -584,6 +584,7 @@ FOR JSON PATH);
 		[source_column] sysname NOT NULL, 
 		[translation_key] nvarchar(MAX) NOT NULL, 
 		[translation_value] nvarchar(MAX) NOT NULL, 
+		[target_json_type] tinyint NULL,
 		[weight] int NOT NULL DEFAULT (1)
 	);	
 
@@ -634,6 +635,7 @@ FOR JSON PATH);
 		[source_column],
 		[translation_key],
 		[translation_value], 
+		[target_json_type],
 		[weight]
 	)
 	SELECT DISTINCT /*  TODO: tired... not sure why I'm tolerating this code-smell/nastiness - but need to address it... */
@@ -641,6 +643,7 @@ FOR JSON PATH);
 		v.[column_name] [source_column], 
 		v.[key_value] [translation_key],
 		v.[translation_value], 
+		v.[target_json_type],
 		2 [weight]
 	FROM 
 		[#nodes] x 
@@ -676,7 +679,7 @@ FOR JSON PATH);
 		UPDATE x 
 		SET 
 			x.[translated_value] = v.[translation_value], 
-			x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value]) /* TODO: might make sense to look at optional overrides here? but kind of doubt it.*/
+			x.[translated_value_type] = CASE WHEN v.[target_json_type] IS NOT NULL THEN [v].[target_json_type] ELSE dda.[get_json_data_type](v.[translation_value]) END
 		FROM 
 			[#nodes] x 
 			INNER JOIN [#translation_key_values] v ON 
@@ -1425,6 +1428,7 @@ FOR JSON PATH);
 		[source_column] sysname NOT NULL, 
 		[translation_key] nvarchar(MAX) NOT NULL, 
 		[translation_value] nvarchar(MAX) NOT NULL, 
+		[target_json_type] tinyint NULL,
 		[weight] int NOT NULL DEFAULT (1)
 	);	
 
@@ -1475,6 +1479,7 @@ FOR JSON PATH);
 		[source_column],
 		[translation_key],
 		[translation_value], 
+		[target_json_type],
 		[weight]
 	)
 	SELECT DISTINCT /*  TODO: tired... not sure why I'm tolerating this code-smell/nastiness - but need to address it... */
@@ -1482,6 +1487,7 @@ FOR JSON PATH);
 		v.[column_name] [source_column], 
 		v.[key_value] [translation_key],
 		v.[translation_value], 
+		v.[target_json_type],
 		2 [weight]
 	FROM 
 		[#nodes] x 
@@ -1517,7 +1523,7 @@ FOR JSON PATH);
 		UPDATE x 
 		SET 
 			x.[translated_value] = v.[translation_value], 
-			x.[translated_value_type] = dda.[get_json_data_type](v.[translation_value]) /* TODO: might make sense to look at optional overrides here? but kind of doubt it.*/
+			x.[translated_value_type] = CASE WHEN v.[target_json_type] IS NOT NULL THEN [v].[target_json_type] ELSE dda.[get_json_data_type](v.[translation_value]) END
 		FROM 
 			[#nodes] x 
 			INNER JOIN [#translation_key_values] v ON 
