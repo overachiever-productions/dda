@@ -14,7 +14,6 @@
 				2. UPDATE. 
 
 
-
 			I N S T A L L
 				1. RUN
 					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
@@ -139,7 +138,6 @@ END;
 --END;
 --GO 
 
-
 IF SCHEMA_ID('dda') IS NULL BEGIN 
 	EXEC('CREATE SCHEMA [dda] AUTHORIZATION [db_owner];');
 END;
@@ -192,15 +190,13 @@ END;
 -----------------------------------
 --##INCLUDE: tables\audits.sql
 
-
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 3. <Placeholder for Cleanup / Refactor from Previous Versions>:
+-- 3. <Placeholder for> Cleanup / Refactor from Previous Versions:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
 
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 4. Deploy new/updated code.
+-- 4. Deploy Code.
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -271,19 +267,8 @@ END;
 -----------------------------------
 --##INCLUDE: utilities\set_bypass_triggers_off.sql
 
-
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 5. Randomize bypass trigger 'key' for every environment/deployment:
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @definition nvarchar(MAX);
-SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
-DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition), LEN(@definition) - PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition));
-SET @body = N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template] ON [dda].[trigger_host] '  + REPLACE(@body, N'0x999090000000000000009999', CONVERT(sysname, CAST(NEWID() AS varbinary(128)), 1));
-
-EXEC sp_executesql @body;
-
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 6. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
+-- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 DECLARE @CurrentVersion varchar(20) = N'##{{dda_version}}';
 DECLARE @VersionDescription nvarchar(200) = N'##{{dda_version_summary}}';
@@ -306,7 +291,7 @@ SELECT * FROM dda.version_history;
 GO
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 7. Notify of need to run dda.update_trigger_definitions if/as needed:
+-- 6. Notify of need to run dda.update_trigger_definitions if/as needed:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true' AND OBJECT_NAME(t.[object_id]) <> N'dynamic_data_auditing_trigger_template') BEGIN 
 	SELECT N'Deployed DDA Triggers Detected' [scan_outcome], N'Please execute dda.update_trigger_definitions.' [recommendation], N'NOTE: Set @PrintOnly = 0 on dda.update_trigger_definitions to MAKE changes. By default, it only shows WHICH changes it WOULD make.' [notes];
