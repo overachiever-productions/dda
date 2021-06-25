@@ -2,6 +2,13 @@
 
 
 */
+DECLARE @contextValue sysname = (SELECT CAST(p.[value] AS sysname) FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id]
+WHERE t.[name] = N'dynamic_data_auditing_trigger_template' AND p.[name] = N'DDATrigger - Bypass Value');
+
+IF @contextValue IS NOT NULL BEGIN 
+	EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = @contextValue;
+END;
+
 DROP TRIGGER IF EXISTS [dda].[dynamic_data_auditing_trigger_template];
 GO
 
@@ -323,5 +330,37 @@ EXEC [sys].[sp_addextendedproperty]
 	@level1type = 'TABLE',
 	@level1name = N'trigger_host', 
 	@level2type = N'TRIGGER', 
-	@level2name = N'dynamic_data_auditing_trigger_template'
+	@level2name = N'dynamic_data_auditing_trigger_template';
+GO
+
+DECLARE @contextBypass sysname = (SELECT CAST(SESSION_CONTEXT(N'CONTEXT_INFO') AS sysname));
+
+IF @contextBypass IS NULL BEGIN 
+	SET @contextBypass = CONVERT(nvarchar(26), CAST(NEWID() AS varbinary(128)), 1);
+	PRINT N'Assigning NEW CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+  END; 
+ELSE BEGIN 
+	PRINT N'Assigning Existing CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+END;
+
+DECLARE @definition nvarchar(MAX);
+SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
+DECLARE @body nvarchar(MAX) = REPLACE(@definition, N'CREATE TRIGGER [dda].[dynamic_data_auditing_trigger_template]', N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template]');
+SET @body = REPLACE(@body, N'0x999090000000000000009999', @contextBypass);
+
+EXEC sp_executesql @body;
+
+-- 'mark' the value for future updates/changes:
+DECLARE @marker nvarchar(MAX) = N'EXEC [sys].[sp_addextendedproperty]
+	@name = N''DDATrigger - Bypass Value'',
+	@value = N''' + @contextBypass + N''',
+	@level0type = ''SCHEMA'',
+	@level0name = N''dda'',
+	@level1type = ''TABLE'',
+	@level1name = N''trigger_host'', 
+	@level2type = N''TRIGGER'', 
+	@level2name = N''dynamic_data_auditing_trigger_template''; ';
+
+EXEC sp_executesql @marker;
+
 GO
