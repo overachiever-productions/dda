@@ -363,4 +363,7 @@ DECLARE @marker nvarchar(MAX) = N'EXEC [sys].[sp_addextendedproperty]
 
 EXEC sp_executesql @marker;
 
+-- clear session-copntext - for subsequent runs/executions/etc. 
+EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = NULL;
+
 GO
