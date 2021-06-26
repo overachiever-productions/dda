@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test empty_string_is_preserved_in_column_name_translations]
+
+CREATE OR ALTER PROCEDURE [translation].[test empty_string_is_preserved_in_column_name_translations]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

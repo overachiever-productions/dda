@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test int_as_number_is_number]
+CREATE OR ALTER PROCEDURE [json].[test int_as_number_is_number]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

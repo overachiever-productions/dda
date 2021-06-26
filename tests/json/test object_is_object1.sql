@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test object_is_object]
+CREATE OR ALTER PROCEDURE [json].[test object_is_object]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

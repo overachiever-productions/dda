@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test lowercase_string_null_is_null]
+CREATE OR ALTER PROCEDURE [json].[test lowercase_string_null_is_null]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

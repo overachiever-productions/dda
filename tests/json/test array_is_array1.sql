@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test array_is_array]
+CREATE OR ALTER PROCEDURE [json].[test array_is_array]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

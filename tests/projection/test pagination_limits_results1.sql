@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [projection].[test pagination_limits_results]
+CREATE OR ALTER PROCEDURE [projection].[test pagination_limits_results]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

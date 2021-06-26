@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test string_is_string]
+CREATE OR ALTER PROCEDURE [json].[test string_is_string]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

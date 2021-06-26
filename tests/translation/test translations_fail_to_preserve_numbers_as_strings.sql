@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [translation].[test translations_fail_to_preserve_numbers_as_strings]
+CREATE OR ALTER PROCEDURE [translation].[test translations_fail_to_preserve_numbers_as_strings]
 AS
 BEGIN
 	/*

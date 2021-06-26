@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test sql_null_is_json_null]
+CREATE OR ALTER PROCEDURE [json].[test sql_null_is_json_null]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
