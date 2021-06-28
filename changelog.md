@@ -1,5 +1,18 @@
 # Change Log
 
+## [5.2] - 2021-06-28
+Sticky CONTEXT_INFO() values; Bug-Fix to ROTATE identification.
+
+## Known-issues 
+- No known issues with DDA functionality. 
+- Unit tests for projection capabilities not fully implemented. 
+
+## Fixed 
+- DDA treats `UPDATE`s where the before/after values of the UPDATE are the same (i.e., nothing has truly changed) as `ROTATE` operations (to help devs identify inefficient code/operations). v5.2 Fixes a BUG where `ROTATE`s that also updated part (or all) of the PRIMARY KEY for a given table were incorrectly flagged as `UPDATE`s instead of `ROTATE`s.
+
+## Changed 
+- To allow Admins/Devs to tackle deployments and other 'system-level' modifications, DDA triggers can be bypassed via the `dda.set_triggers_bypass_on|off` stored procedures - which grab-and-spam a specific 'key' into `CONTEXT_INFO()`. This 'key' is unique per each database/deployment and, prior to v5.2 was accidentally being overwritten/re-written with each update to DDA logic/code. (With v5.2, DDA deployment/update code will check to see if this 'key' has been defined (i.e., deployed already) and will KEEP the same/existing value when present.)
+
 ## [5.0] - 2021-05-25
 
 ## Known-Issues

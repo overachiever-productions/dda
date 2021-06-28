@@ -2,6 +2,14 @@
 
 
 */
+
+DECLARE @contextValue sysname = (SELECT CAST(p.[value] AS sysname) FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id]
+WHERE t.[name] = N'dynamic_data_auditing_trigger_template' AND p.[name] = N'DDATrigger - Bypass Value');
+
+IF @contextValue IS NOT NULL BEGIN 
+	EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = @contextValue;
+END;
+
 DROP TRIGGER IF EXISTS [dda].[dynamic_data_auditing_trigger_template];
 GO
 
@@ -190,15 +198,55 @@ AS
 			WHERE [result] IN (SELECT [result] FROM dda.[split_string](@rawKeys, N',', 1))
 		) SET @keyUpdate = 1;
 
-		IF @keyUpdate = 1 BEGIN 
+		DECLARE @isRotate bit = 0;
+		DECLARE @rotateSQL nvarchar(MAX);
 
-			IF @rowCount = 1 BEGIN
-				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
+		SET @rotateSQL = N'			WITH delete_sums AS (
+			SELECT 
+				' + @rawKeys + N', 
+				CHECKSUM(' + @rawColumnNames + N') [changesum]
+			FROM 
+				[#temp_deleted]
+		), 
+		insert_sums AS (
+			SELECT
+				' + @rawKeys + N', 
+				CHECKSUM(' + @rawColumnNames + N') [changesum]
+			FROM 
+				[#temp_inserted]
+		), 
+		comparisons AS ( 
+			SELECT 
+				' + @keys + N',
+				CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
+			FROM 
+				[delete_sums] d 
+				INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
+		)
+
+		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+
+		EXEC sp_executesql 
+			@rotateSQL, 
+			N'@isRotate bit OUTPUT', 
+			@isRotate = @isRotate OUTPUT;
+
+		IF @rowCount = 1 BEGIN 
+			/* There are effectively 2 outcomes possible here: a ROTATE, or an UPDATE (only, if the UPDATE includes changes to key columns, we'll fake this back to a normal UPDATE) */
+			IF @keyUpdate = 1 BEGIN 
+				/* simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).  */
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
 				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] ';
-			  END;
-			ELSE BEGIN 
-				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
+			END;
+
+			/* at this point, we're 'back' to a normal UPDATE - UNLESS this is a ROTATE: */
+			IF @isRotate = 1 SET @operationType = 'ROTATE';
+
+		  END;
+		ELSE BEGIN 
+			
+			IF @keyUpdate = 1 BEGIN /* determine if this is a MUTATE or an UPDATE */
+				/* If we have secondary keys defined, we can use those and 'salvage' this as an UPDATE (or ROTATE) */				
 				DECLARE @secondaryKeys nvarchar(260);
 				SELECT @secondaryKeys = [serialized_secondary_columns] FROM [dda].[secondary_keys] WHERE [schema] = @schemaName AND [table] = @tableName;
 
@@ -231,44 +279,11 @@ AS
 
 					RAISERROR(N'Dynamic Data Audits Warning:%s%sMulti-row UPDATEs that modify Primary Key values cannot be tracked without a mapping in dda.secondary_keys.%s%sThis operation was allowed, but resulted in a "dump" to dda.audits vs row-by-row change-tracking details.', 8, 1, @crlf, @tab, @crlf, @tab);
 				END;
-			END;
-		  END;
-		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
-			DECLARE @isRotate bit = 0;
-
-			DECLARE @rotateSQL nvarchar(MAX) = N'			WITH delete_sums AS (
-				SELECT 
-					' + @rawKeys + N', 
-					CHECKSUM(' + @rawColumnNames + N') [changesum]
-				FROM 
-					[#temp_deleted]
-			), 
-			insert_sums AS (
-				SELECT
-					' + @rawKeys + N', 
-					CHECKSUM(' + @rawColumnNames + N') [changesum]
-				FROM 
-					[#temp_inserted]
-			), 
-			comparisons AS ( 
-				SELECT 
-					' + @keys + N',
-					CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
-				FROM 
-					[delete_sums] d 
-					INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
-			)
-
-			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
-
-			--EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			END; 
 			
-			EXEC sp_executesql 
-				@rotateSQL, 
-				N'@isRotate bit OUTPUT', 
-				@isRotate = @isRotate OUTPUT;
-
-			IF @isRotate = 1 SET @operationType = 'ROTATE';
+			IF @operationType <> N'MUTATE' BEGIN /* if it's not a MUTATE, it's an UPDATE - unless it's a ROTATE */
+				IF @isRotate = 1 SET @operationType = 'ROTATE';
+			END;
 		END;
 
 		SET @sql  = REPLACE(@sql, N'{FROM_CLAUSE}', N'[#temp_inserted] [i]');
@@ -323,5 +338,39 @@ EXEC [sys].[sp_addextendedproperty]
 	@level1type = 'TABLE',
 	@level1name = N'trigger_host', 
 	@level2type = N'TRIGGER', 
-	@level2name = N'dynamic_data_auditing_trigger_template'
+	@level2name = N'dynamic_data_auditing_trigger_template';
+GO
+
+DECLARE @contextBypass sysname = (SELECT CAST(SESSION_CONTEXT(N'CONTEXT_INFO') AS sysname));
+
+IF @contextBypass IS NULL BEGIN 
+	SET @contextBypass = CONVERT(nvarchar(26), CAST(NEWID() AS varbinary(128)), 1);
+	PRINT N'Assigning NEW CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+  END; 
+ELSE BEGIN 
+	PRINT N'Assigning Existing CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+END;
+
+DECLARE @definition nvarchar(MAX);
+SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
+DECLARE @body nvarchar(MAX) = REPLACE(@definition, N'CREATE TRIGGER [dda].[dynamic_data_auditing_trigger_template]', N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template]');
+SET @body = REPLACE(@body, N'0x999090000000000000009999', @contextBypass);
+
+EXEC sp_executesql @body;
+
+-- 'mark' the value for future updates/changes:
+DECLARE @marker nvarchar(MAX) = N'EXEC [sys].[sp_addextendedproperty]
+	@name = N''DDATrigger - Bypass Value'',
+	@value = N''' + @contextBypass + N''',
+	@level0type = ''SCHEMA'',
+	@level0name = N''dda'',
+	@level1type = ''TABLE'',
+	@level1name = N''trigger_host'', 
+	@level2type = N''TRIGGER'', 
+	@level2name = N''dynamic_data_auditing_trigger_template''; ';
+
+EXEC sp_executesql @marker;
+
+-- clear session-copntext - for subsequent runs/executions/etc. 
+EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = NULL;
 GO

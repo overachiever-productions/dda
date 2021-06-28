@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [projection].[test transformoutput_to_false_does_not_translate_output]
+
+CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_false_does_not_translate_output]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

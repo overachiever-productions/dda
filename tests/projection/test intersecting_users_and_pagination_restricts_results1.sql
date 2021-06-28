@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [projection].[test intersecting_users_and_pagination_restricts_results]
+
+CREATE OR ALTER PROCEDURE [projection].[test intersecting_users_and_pagination_restricts_results]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

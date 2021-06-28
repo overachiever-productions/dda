@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test foreign_key_translations_work_with_multi_row_captures]
+
+CREATE OR ALTER PROCEDURE [translation].[test foreign_key_translations_work_with_multi_row_captures]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test nulls_can_be_replaced_by_value_translations]
+
+CREATE OR ALTER PROCEDURE [translation].[test nulls_can_be_replaced_by_value_translations]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

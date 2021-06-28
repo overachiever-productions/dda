@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [translation].[test translations_map_numbers_as_strings_when_directed]
+CREATE OR ALTER PROCEDURE [translation].[test translations_map_numbers_as_strings_when_directed]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

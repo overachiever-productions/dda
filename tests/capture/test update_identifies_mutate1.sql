@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [capture].[test update_identifies_rotate]
+CREATE OR ALTER PROCEDURE [capture].[test update_identifies_mutate]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -10,12 +10,12 @@ BEGIN
 		@Identity = 1;
 	
 	EXEC [tSQLt].[FakeTable] 
-		@TableName = N'dbo.SortTable', 
+		@TableName = N'dbo.GapsIslands', 
 		@Identity = 1;
 
 	EXEC [tSQLt].[ApplyTrigger] 
-		@TableName = N'dbo.SortTable', 
-		@TriggerName = N'ddat_SortTable';
+		@TableName = N'dbo.GapsIslands', 
+		@TriggerName = N'ddat_GapsIslands';
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
@@ -23,65 +23,53 @@ BEGIN
 	WITH multiples AS ( 
 
 		SELECT 
-			27 [CustomerID], 
-			GETDATE() [OrderDate], 
-			999.99 [Value], 
-			'xxxx_xxxx' [ColChar]
+			1 [ID], 
+			18 [SeqNo]
 
 		UNION ALL  
 
 		SELECT 
-			28 [CustomerID], 
-			GETDATE() [OrderDate], 
-			999.99 [Value], 
-			'yyyy_yyyy' [ColChar]
+			2 [ID], 
+			48 [SeqNo]
 
 		UNION ALL 
 		
 		SELECT 
-			30 [CustomerID], 
-			GETDATE() [OrderDate], 
-			999.99 [Value], 
-			'zzzzz_zzzz' [ColChar]
+			3 [ID], 
+			124 [SeqNo]
 
 		UNION ALL 
 		
 		SELECT 
-			30 [CustomerID], 
-			GETDATE() [OrderDate], 
-			999.99 [Value], 
-			'aaaa_aaaa' [ColChar]
+			4 [ID], 
+			189 [SeqNo]
 	)
 
-	INSERT INTO [dbo].[SortTable] (
-		[CustomerID],
-		[OrderDate],
-		[Value],
-		[ColChar]
+	INSERT INTO [dbo].[GapsIslands] (
+		[ID],
+		[SeqNo]
 	)
 	SELECT 
-		[CustomerID],
-		[OrderDate],
-		[Value],
-		[ColChar] 
+		[ID], 
+		[SeqNo]
 	FROM 
 		[multiples];	
 
-	UPDATE dbo.[SortTable] 
+	UPDATE dbo.GapsIslands 
 	SET 
-		[Value] = 999.99, 
-		[ColChar] = [ColChar]
+		ID = ID + 100, 
+		[SeqNo] = [SeqNo] - 100
 	WHERE 
-		[OrderID] IN (1, 2); 
+		[ID] IN (1, 2, 3);
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
-	
+
 	DECLARE @rowCount int = (SELECT [row_count] FROM dda.[audits] WHERE [audit_id] = 2);
-	EXEC [tSQLt].[AssertEquals] @Expected = 2, @Actual = @rowCount;
+	EXEC [tSQLt].[AssertEquals] @Expected = 3, @Actual = @rowCount;
 
 	DECLARE @operation sysname = (SELECT [operation] FROM dda.[audits] WHERE [audit_id] = 2);
-	EXEC [tSQLt].[AssertEqualsString] @Expected = N'ROTATE', @Actual = @operation;
+	EXEC [tSQLt].[AssertEqualsString] @Expected = N'MUTATE', @Actual = @operation;	
 
 END;

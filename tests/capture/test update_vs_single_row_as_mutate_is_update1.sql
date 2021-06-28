@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [capture].[test capture_collects_user]
+CREATE OR ALTER PROCEDURE [capture].[test update_vs_single_row_as_mutate_is_update]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -10,37 +10,65 @@ BEGIN
 		@Identity = 1;
 	
 	EXEC [tSQLt].[FakeTable] 
-		@TableName = N'dbo.SortTable', 
+		@TableName = N'dbo.GapsIslands', 
 		@Identity = 1;
 
 	EXEC [tSQLt].[ApplyTrigger] 
-		@TableName = N'dbo.SortTable', 
-		@TriggerName = N'ddat_SortTable';
-	
+		@TableName = N'dbo.GapsIslands', 
+		@TriggerName = N'ddat_GapsIslands';
+
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
 	-----------------------------------------------------------------------------------------------------------------
-	INSERT INTO [dbo].[SortTable] (
-		[CustomerID],
-		[OrderDate],
-		[Value],
-		[ColChar]
+	WITH multiples AS ( 
+
+		SELECT 
+			1 [ID], 
+			18 [SeqNo]
+
+		UNION ALL  
+
+		SELECT 
+			2 [ID], 
+			48 [SeqNo]
+
+		UNION ALL 
+		
+		SELECT 
+			3 [ID], 
+			124 [SeqNo]
+
+		UNION ALL 
+		
+		SELECT 
+			4 [ID], 
+			189 [SeqNo]
 	)
-	VALUES	(
-		27,
-		GETDATE(),
-		2138.73,
-		'52A0FD4B-B4EE-4A6C-A453-DBD67DE4E51C     '
-	);
+
+	INSERT INTO [dbo].[GapsIslands] (
+		[ID],
+		[SeqNo]
+	)
+	SELECT 
+		[ID], 
+		[SeqNo]
+	FROM 
+		[multiples];	
+
+	UPDATE dbo.GapsIslands 
+	SET 
+		[SeqNo] = 87
+	WHERE 
+		[ID] = 2;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
-	DECLARE @rowCount int = (SELECT COUNT(*) FROM dda.[audits]);
+
+	DECLARE @rowCount int = (SELECT [row_count] FROM dda.[audits] WHERE [audit_id] = 2);
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
-	DECLARE @user sysname = (SELECT [user] FROM dda.[audits] WHERE [audit_id] = 1); 
-	DECLARE @currentUser sysname = ORIGINAL_LOGIN();
-	EXEC [tSQLt].[AssertEqualsString] @Expected = @currentUser, @Actual = @user;
-	 
+	DECLARE @operation sysname = (SELECT [operation] FROM dda.[audits] WHERE [audit_id] = 2);
+	EXEC [tSQLt].[AssertEqualsString] @Expected = N'UPDATE', @Actual = @operation;	
+
 END;
