@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test column_name_translations_are_case_insensitive]
+U
+CREATE OR ALTER PROCEDURE [translation].[test column_name_translations_are_case_insensitive]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

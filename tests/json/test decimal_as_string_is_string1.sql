@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [json].[test decimal_as_string_is_string]
+CREATE OR ALTER PROCEDURE [json].[test decimal_as_string_is_string]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

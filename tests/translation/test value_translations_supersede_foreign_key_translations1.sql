@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test value_translations_supersede_foreign_key_translations]
+
+CREATE OR ALTER PROCEDURE [translation].[test value_translations_supersede_foreign_key_translations]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [projection].[test endtime_without_starttime_throws]
+
+CREATE OR ALTER PROCEDURE [projection].[test endtime_without_starttime_throws]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

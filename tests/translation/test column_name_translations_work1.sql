@@ -1,5 +1,5 @@
 
-ALTER PROCEDURE [translation].[test column_name_translations_work]
+CREATE OR ALTER PROCEDURE [translation].[test column_name_translations_work]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

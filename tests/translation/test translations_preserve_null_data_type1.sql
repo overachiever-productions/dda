@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test translations_preserve_null_data_type]
+
+CREATE OR ALTER PROCEDURE [translation].[test translations_preserve_null_data_type]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

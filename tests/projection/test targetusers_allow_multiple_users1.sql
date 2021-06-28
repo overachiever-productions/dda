@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [projection].[test targetusers_allow_multiple_users]
+
+CREATE OR ALTER PROCEDURE [projection].[test targetusers_allow_multiple_users]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------

@@ -1,10 +1,5 @@
-USE [dda_test]
-GO
-SET ANSI_NULLS ON
-GO
-SET QUOTED_IDENTIFIER ON
-GO
-ALTER PROCEDURE [translation].[test json_data_is_not_xml_encoded]
+
+CREATE OR ALTER PROCEDURE [translation].[test json_data_is_not_xml_encoded]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
