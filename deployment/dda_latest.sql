@@ -12,7 +12,6 @@
 				2. UPDATE. 
 
 
-
 			I N S T A L L
 				1. RUN
 					- Make sure you've opened this script in/against the database you wish to target (i.e., not master, or some other database, etc).
@@ -136,7 +135,6 @@ END;
 --	RAISERROR('WARNING: dda schema already exists - execution is being terminated and connection will be broken.', 21, 1) WITH LOG;
 --END;
 --GO 
-
 
 IF SCHEMA_ID('dda') IS NULL BEGIN 
 	EXEC('CREATE SCHEMA [dda] AUTHORIZATION [db_owner];');
@@ -681,15 +679,13 @@ IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.au
 END;
 
 
-
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 3. <Placeholder for Cleanup / Refactor from Previous Versions>:
+-- 3. <Placeholder for> Cleanup / Refactor from Previous Versions:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-
 
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 4. Deploy new/updated code.
+-- 4. Deploy Code.
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -710,7 +706,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -745,7 +741,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -817,7 +813,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -886,7 +882,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -996,7 +992,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1036,7 +1032,7 @@ GO
 CREATE FUNCTION dda.[extract_custom_trigger_logic](@TriggerName sysname)
 RETURNS @output table ([definition] nvarchar(MAX) NULL) 
 AS 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @body nvarchar(MAX); 
@@ -1077,6 +1073,14 @@ GO
 
 
 */
+
+DECLARE @contextValue sysname = (SELECT CAST(p.[value] AS sysname) FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id]
+WHERE t.[name] = N'dynamic_data_auditing_trigger_template' AND p.[name] = N'DDATrigger - Bypass Value');
+
+IF @contextValue IS NOT NULL BEGIN 
+	EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = @contextValue;
+END;
+
 DROP TRIGGER IF EXISTS [dda].[dynamic_data_auditing_trigger_template];
 GO
 
@@ -1089,7 +1093,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN /* @context is randomized/uniquified during deployment ... */
@@ -1265,15 +1269,55 @@ AS
 			WHERE [result] IN (SELECT [result] FROM dda.[split_string](@rawKeys, N',', 1))
 		) SET @keyUpdate = 1;
 
-		IF @keyUpdate = 1 BEGIN 
+		DECLARE @isRotate bit = 0;
+		DECLARE @rotateSQL nvarchar(MAX);
 
-			IF @rowCount = 1 BEGIN
-				-- simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).
+		SET @rotateSQL = N'			WITH delete_sums AS (
+			SELECT 
+				' + @rawKeys + N', 
+				CHECKSUM(' + @rawColumnNames + N') [changesum]
+			FROM 
+				[#temp_deleted]
+		), 
+		insert_sums AS (
+			SELECT
+				' + @rawKeys + N', 
+				CHECKSUM(' + @rawColumnNames + N') [changesum]
+			FROM 
+				[#temp_inserted]
+		), 
+		comparisons AS ( 
+			SELECT 
+				' + @keys + N',
+				CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
+			FROM 
+				[delete_sums] d 
+				INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
+		)
+
+		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+
+		EXEC sp_executesql 
+			@rotateSQL, 
+			N'@isRotate bit OUTPUT', 
+			@isRotate = @isRotate OUTPUT;
+
+		IF @rowCount = 1 BEGIN 
+			/* There are effectively 2 outcomes possible here: a ROTATE, or an UPDATE (only, if the UPDATE includes changes to key columns, we'll fake this back to a normal UPDATE) */
+			IF @keyUpdate = 1 BEGIN 
+				/* simulate/create a pseudo-secondary-key by setting 'row_id' for both 'tables' to 1 (since there's only a single row).  */
 				UPDATE [#temp_inserted] SET [dda_trigger_id] = (SELECT TOP (1) [dda_trigger_id] FROM [#temp_deleted]);
 				SET @joinKeys = N'[i2].[dda_trigger_id] = [d].[dda_trigger_id] ';
-			  END;
-			ELSE BEGIN 
-				-- Either use a secondary_key, or we HAVE to dump #deleted and #inserted contents vs normal row-by-row capture:
+			END;
+
+			/* at this point, we're 'back' to a normal UPDATE - UNLESS this is a ROTATE: */
+			IF @isRotate = 1 SET @operationType = 'ROTATE';
+
+		  END;
+		ELSE BEGIN 
+			
+			IF @keyUpdate = 1 BEGIN /* determine if this is a MUTATE or an UPDATE */
+				/* If we have secondary keys defined, we can use those and 'salvage' this as an UPDATE (or ROTATE) */				
 				DECLARE @secondaryKeys nvarchar(260);
 				SELECT @secondaryKeys = [serialized_secondary_columns] FROM [dda].[secondary_keys] WHERE [schema] = @schemaName AND [table] = @tableName;
 
@@ -1306,44 +1350,11 @@ AS
 
 					RAISERROR(N'Dynamic Data Audits Warning:%s%sMulti-row UPDATEs that modify Primary Key values cannot be tracked without a mapping in dda.secondary_keys.%s%sThis operation was allowed, but resulted in a "dump" to dda.audits vs row-by-row change-tracking details.', 8, 1, @crlf, @tab, @crlf, @tab);
 				END;
-			END;
-		  END;
-		ELSE BEGIN  -- if PK wasn't changed, check for ROTATE.
-			DECLARE @isRotate bit = 0;
-
-			DECLARE @rotateSQL nvarchar(MAX) = N'			WITH delete_sums AS (
-				SELECT 
-					' + @rawKeys + N', 
-					CHECKSUM(' + @rawColumnNames + N') [changesum]
-				FROM 
-					[#temp_deleted]
-			), 
-			insert_sums AS (
-				SELECT
-					' + @rawKeys + N', 
-					CHECKSUM(' + @rawColumnNames + N') [changesum]
-				FROM 
-					[#temp_inserted]
-			), 
-			comparisons AS ( 
-				SELECT 
-					' + @keys + N',
-					CASE WHEN d.changesum = i2.changesum THEN 1 ELSE 0 END [is_rotate]
-				FROM 
-					[delete_sums] d 
-					INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
-			)
-
-			SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
-
-			--EXEC [admindb].dbo.[print_long_string] @rotateSQL;
+			END; 
 			
-			EXEC sp_executesql 
-				@rotateSQL, 
-				N'@isRotate bit OUTPUT', 
-				@isRotate = @isRotate OUTPUT;
-
-			IF @isRotate = 1 SET @operationType = 'ROTATE';
+			IF @operationType <> N'MUTATE' BEGIN /* if it's not a MUTATE, it's an UPDATE - unless it's a ROTATE */
+				IF @isRotate = 1 SET @operationType = 'ROTATE';
+			END;
 		END;
 
 		SET @sql  = REPLACE(@sql, N'{FROM_CLAUSE}', N'[#temp_inserted] [i]');
@@ -1398,7 +1409,41 @@ EXEC [sys].[sp_addextendedproperty]
 	@level1type = 'TABLE',
 	@level1name = N'trigger_host', 
 	@level2type = N'TRIGGER', 
-	@level2name = N'dynamic_data_auditing_trigger_template'
+	@level2name = N'dynamic_data_auditing_trigger_template';
+GO
+
+DECLARE @contextBypass sysname = (SELECT CAST(SESSION_CONTEXT(N'CONTEXT_INFO') AS sysname));
+
+IF @contextBypass IS NULL BEGIN 
+	SET @contextBypass = CONVERT(nvarchar(26), CAST(NEWID() AS varbinary(128)), 1);
+	PRINT N'Assigning NEW CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+  END; 
+ELSE BEGIN 
+	PRINT N'Assigning Existing CONTEXT_INFO() value of ' + @contextBypass + N' for trigger bypass functionality.';
+END;
+
+DECLARE @definition nvarchar(MAX);
+SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
+DECLARE @body nvarchar(MAX) = REPLACE(@definition, N'CREATE TRIGGER [dda].[dynamic_data_auditing_trigger_template]', N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template]');
+SET @body = REPLACE(@body, N'0x999090000000000000009999', @contextBypass);
+
+EXEC sp_executesql @body;
+
+-- 'mark' the value for future updates/changes:
+DECLARE @marker nvarchar(MAX) = N'EXEC [sys].[sp_addextendedproperty]
+	@name = N''DDATrigger - Bypass Value'',
+	@value = N''' + @contextBypass + N''',
+	@level0type = ''SCHEMA'',
+	@level0name = N''dda'',
+	@level1type = ''TABLE'',
+	@level1name = N''trigger_host'', 
+	@level2type = N''TRIGGER'', 
+	@level2name = N''dynamic_data_auditing_trigger_template''; ';
+
+EXEC sp_executesql @marker;
+
+-- clear session-copntext - for subsequent runs/executions/etc. 
+EXEC sp_set_session_context @key = N'CONTEXT_INFO', @value = NULL;
 GO
 
 
@@ -1466,7 +1511,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -2310,7 +2355,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -3154,7 +3199,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	WITH core AS ( 
 		SELECT 
@@ -3214,7 +3259,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3367,7 +3412,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3789,7 +3834,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4066,7 +4111,7 @@ CREATE PROC dda.[disable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4205,7 +4250,7 @@ CREATE PROC dda.[enable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4619,7 +4664,7 @@ CREATE PROC dda.[set_bypass_triggers_on]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4682,7 +4727,7 @@ CREATE PROC dda.[set_bypass_triggers_off]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.0.3632.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4702,22 +4747,11 @@ AS
 GO
 
 
-
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 5. Randomize bypass trigger 'key' for every environment/deployment:
+-- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @definition nvarchar(MAX);
-SELECT @definition = [definition] FROM sys.[sql_modules] WHERE [object_id] = (SELECT [object_id] FROM sys.[triggers] WHERE [name] = N'dynamic_data_auditing_trigger_template' AND [parent_id] = OBJECT_ID('dda.trigger_host'));
-DECLARE @body nvarchar(MAX) = SUBSTRING(@definition, PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition), LEN(@definition) - PATINDEX(N'%FOR INSERT, UPDATE, DELETE%', @definition));
-SET @body = N'ALTER TRIGGER [dda].[dynamic_data_auditing_trigger_template] ON [dda].[trigger_host] '  + REPLACE(@body, N'0x999090000000000000009999', CONVERT(sysname, CAST(NEWID() AS varbinary(128)), 1));
-
-EXEC sp_executesql @body;
-
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 6. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'5.0.3632.1';
-DECLARE @VersionDescription nvarchar(200) = N'Full Revamp of translation + JSON data-typing.';
+DECLARE @CurrentVersion varchar(20) = N'5.2.3666.1';
+DECLARE @VersionDescription nvarchar(200) = N'Sticky CONTEXT_INFO() values; Bug-Fix to ROTATE identification.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
@@ -4737,7 +4771,7 @@ SELECT * FROM dda.version_history;
 GO
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 7. Notify of need to run dda.update_trigger_definitions if/as needed:
+-- 6. Notify of need to run dda.update_trigger_definitions if/as needed:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 IF EXISTS (SELECT NULL FROM sys.[triggers] t INNER JOIN sys.[extended_properties] p ON t.[object_id] = p.[major_id] WHERE p.[name] = N'DDATrigger' AND p.[value] = 'true' AND OBJECT_NAME(t.[object_id]) <> N'dynamic_data_auditing_trigger_template') BEGIN 
 	SELECT N'Deployed DDA Triggers Detected' [scan_outcome], N'Please execute dda.update_trigger_definitions.' [recommendation], N'NOTE: Set @PrintOnly = 0 on dda.update_trigger_definitions to MAKE changes. By default, it only shows WHICH changes it WOULD make.' [notes];
