@@ -224,7 +224,7 @@ AS
 				INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
 		)
 
-		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 1) THEN 1 ELSE 0 END;'
 
 		EXEC sp_executesql 
 			@rotateSQL, 
