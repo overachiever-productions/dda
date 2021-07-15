@@ -522,7 +522,8 @@ FOR JSON PATH);
 		CROSS APPLY OPENJSON([z].[Value], N'$') y
 	WHERE 
 		[y].[Type] = 5 AND
-		[y].[Value] LIKE '%from":%"to":%';
+		[y].[Value] LIKE '%from":%"to":%'
+	OPTION (MAXDOP 1);
 
 	WITH [from_to] AS ( 
 
@@ -1378,7 +1379,8 @@ FOR JSON PATH);
 		CROSS APPLY OPENJSON([z].[Value], N'$') y
 	WHERE 
 		[y].[Type] = 5 AND
-		[y].[Value] LIKE '%from":%"to":%';
+		[y].[Value] LIKE '%from":%"to":%'
+	OPTION (MAXDOP 1);
 
 	WITH [from_to] AS ( 
 
