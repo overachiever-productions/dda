@@ -203,7 +203,7 @@ FOR JSON PATH);
 		IF @StartTransactionID LIKE N'%-%' BEGIN 
 			SELECT @year = LEFT(@StartTransactionID, 4);
 			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
-			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+			SET @startTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@StartTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 
 			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
@@ -215,7 +215,7 @@ FOR JSON PATH);
 
 		IF @EndTransactionID IS NOT NULL BEGIN 
 			IF @EndTransactionID LIKE N'%-%' BEGIN 
-				SET @endTx = RIGHT(@EndTransactionID, 9);
+				SET @endTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@EndTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 			  END; 
 			ELSE BEGIN 
 				SET @endTx = TRY_CAST(@EndTransactionID AS int);
@@ -232,7 +232,11 @@ FOR JSON PATH);
 			RETURN -80;
 		END;
 
-		IF @txDate IS NOT NULL BEGIN 
+		IF @txDate IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -81;
+		  END;
+		ELSE BEGIN 
 			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
 		END;
 		
@@ -762,6 +766,14 @@ FOR JSON PATH);
 		[#scalar] x 
 		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
 
+	/* Re-encode de-encoded (or non-encoded (translation)) JSON: */
+	UPDATE [#nodes] 
+	SET 
+		[original_value] = CASE WHEN [original_value_type] = 1 THEN STRING_ESCAPE([original_value], 'json') ELSE [original_value] END, 
+		[translated_value] = CASE WHEN [translated_value_type] = 1 THEN STRING_ESCAPE([translated_value], 'json') ELSE [translated_value] END
+	WHERE 
+		ISNULL([translated_value_type], [original_value_type]) = 1; 
+
 	/* Serialize Details (for non UPDATEs - they've already been handled above) */
 	WITH [flattened] AS ( 
 		SELECT 
@@ -1047,7 +1059,7 @@ FOR JSON PATH);
 		IF @StartTransactionID LIKE N'%-%' BEGIN 
 			SELECT @year = LEFT(@StartTransactionID, 4);
 			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
-			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+			SET @startTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@StartTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 
 			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
@@ -1059,7 +1071,7 @@ FOR JSON PATH);
 
 		IF @EndTransactionID IS NOT NULL BEGIN 
 			IF @EndTransactionID LIKE N'%-%' BEGIN 
-				SET @endTx = RIGHT(@EndTransactionID, 9);
+				SET @endTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@EndTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 			  END; 
 			ELSE BEGIN 
 				SET @endTx = TRY_CAST(@EndTransactionID AS int);
@@ -1076,7 +1088,11 @@ FOR JSON PATH);
 			RETURN -80;
 		END;
 
-		IF @txDate IS NOT NULL BEGIN 
+		IF @txDate IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -81;
+		  END;
+		ELSE BEGIN 
 			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
 		END;
 		
@@ -1421,7 +1437,6 @@ FOR JSON PATH);
 	WHERE 
 		x.[translated_column] IS NULL; 
 
-
 	CREATE TABLE #translation_key_values (
 		[row_id] int IDENTITY(1,1) NOT NULL, 
 		[source_table] sysname NOT NULL, 
@@ -1606,6 +1621,13 @@ FOR JSON PATH);
 		[#scalar] x 
 		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
 
+	/* Re-encode de-encoded (or non-encoded (translation)) JSON: */
+	UPDATE [#nodes] 
+	SET 
+		[original_value] = CASE WHEN [original_value_type] = 1 THEN STRING_ESCAPE([original_value], 'json') ELSE [original_value] END, 
+		[translated_value] = CASE WHEN [translated_value_type] = 1 THEN STRING_ESCAPE([translated_value], 'json') ELSE [translated_value] END
+	WHERE 
+		ISNULL([translated_value_type], [original_value_type]) = 1; 
 
 	/* Serialize Details (for non UPDATEs - they've already been handled above) */
 	WITH [flattened] AS ( 
@@ -1631,7 +1653,6 @@ FOR JSON PATH);
 		GROUP BY 
 			[row_number],
 			[json_row_id]
-
 	)
 
 	UPDATE x 
