@@ -1,5 +1,9 @@
+/*
+	This test addresses "to": and "from": values within UPDATEs.
 
-CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_true_translates_output]
+*/
+
+CREATE OR ALTER PROCEDURE [projection].[test json_encoded_update_data_is_re-encoded]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -7,7 +11,7 @@ BEGIN
 	-----------------------------------------------------------------------------------------------------------------
 	EXEC [tSQLt].[FakeTable] 
 		@TableName = N'dda.audits';
-	
+
 	INSERT INTO dda.[audits] (
 		[audit_id],
 		[timestamp],
@@ -19,33 +23,16 @@ BEGIN
 		[row_count],
 		[audit]
 	)
-	VALUES	
-	(
-		88,
-		'2021-03-12 10:43:09.250',
+	VALUES	(
+		128,
+		'2021-03-12 14:43:09.250',
 		N'dbo', 
 		N'FilePaths', 
-		'mikec', 
-		'INSERT', 
-		31407, 
+		'kateg', 
+		'UPDATE', 
+		55531407, 
 		1, 
-		N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Dropbox\\Repositories\\dda\\core"}]}]'
-	);
-
-	-- value translations:
-	EXEC [tSQLt].[FakeTable] @TableName = N'dda.translation_values', @Identity = 1;
-	INSERT INTO dda.[translation_values] (
-		[table_name],
-		[column_name],
-		[key_value],
-		[translation_value]
-	)
-	VALUES	
-	(
-		N'dbo.FilePaths',
-		N'FilePath',
-		N'D:\Dropbox\Repositories\dda\core',
-		N'No longer a file path'
+		N'[{"key":[{"FilePathId":2}],"detail":[{"FilePath":{"from":"D:\\Dropbox\\Repositories\\dda\\core","to":"D:\\Dropbox\\Repositories\\dda\\deployment"}}]}]'
 	);
 
 	DROP TABLE IF EXISTS #search_output;
@@ -79,8 +66,7 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@StartAuditID = 88, 
-		@TransformOutput = 1;
+		@StartAuditID = 128;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
@@ -89,8 +75,13 @@ BEGIN
 	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]); 
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
-	DECLARE @row1_json nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
+	DECLARE @expectedJson nvarchar(MAX) = N'[{"key":[{"FilePathId":2}],"detail":[{"FilePath":{"from":"D:\\Dropbox\\Repositories\\dda\\core","to":"D:\\Dropbox\\Repositories\\dda\\deployment"}}]}]';
 
-	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"No longer a file path"}]}]';
-	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
+	DECLARE @originaJson nvarchar(MAX) = (SELECT [audit] FROM dda.[audits] WHERE [audit_id] = 128);
+	DECLARE @transformedJson nvarchar(MAX) = (SELECT [change_details] FROM [#search_output] WHERE [row_number] = 1);
+
+	-- verify that if/when there are no translations, that we get 'out' what we put in - i.e., re-encoded JSON: 
+	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJson, @Actual = @originaJson;
+	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJson, @Actual = @transformedJson;
+
 END;

@@ -49,7 +49,7 @@ BEGIN
 		N'dbo.Customers', -- table_name - sysname
 		N'S15', -- column_name - sysname
 		N'', -- key_value - sysname
-		N'N/A' -- translation_value - sysname
+		N'Not applicable' -- translation_value - sysname
 	);
 
 	DROP TABLE IF EXISTS #search_output;
@@ -96,7 +96,7 @@ BEGIN
 
 	 DECLARE @row1_json nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
 
-	 DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"CustId":"_Test3fffrtyhrt"}],"detail":[{"TotalStep":{"from":14,"to":15},"S15":{"from":"N/A","to":"FileManagement"}}]}]';
+	 DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"CustId":"_Test3fffrtyhrt"}],"detail":[{"TotalStep":{"from":14,"to":15},"S15":{"from":"Not applicable","to":"FileManagement"}}]}]';
 	 EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
 
 END;

@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_true_translates_output]
+CREATE OR ALTER PROCEDURE [translation].[test translated_strings_are_json_encoded]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -32,20 +32,22 @@ BEGIN
 		N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Dropbox\\Repositories\\dda\\core"}]}]'
 	);
 
-	-- value translations:
-	EXEC [tSQLt].[FakeTable] @TableName = N'dda.translation_values', @Identity = 1;
+	EXEC [tSQLt].[FakeTable] 
+		@TableName = N'dda.translation_values';
+
 	INSERT INTO dda.[translation_values] (
 		[table_name],
 		[column_name],
 		[key_value],
-		[translation_value]
+		[translation_value],
+		[target_json_type]
 	)
-	VALUES	
-	(
-		N'dbo.FilePaths',
-		N'FilePath',
+	VALUES	(
+		N'dbo.FilePaths', -- table_name - sysname
+		N'FilePath', -- column_name - sysname
 		N'D:\Dropbox\Repositories\dda\core',
-		N'No longer a file path'
+		N'D:\Repos\dda\core',
+		1 -- target_json_type - tinyint
 	);
 
 	DROP TABLE IF EXISTS #search_output;
@@ -66,6 +68,7 @@ BEGIN
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
 	-----------------------------------------------------------------------------------------------------------------
+
 	INSERT INTO [#search_output] (
 		[row_number],
 		[total_rows],
@@ -79,18 +82,18 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@StartAuditID = 88, 
+		@StartAuditID = 88,
 		@TransformOutput = 1;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
-
-	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]); 
+	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]);
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
-	DECLARE @row1_json nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
+	DECLARE @actualJson nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
+	DECLARE @expectedJson nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Repos\\dda\\core"}]}]';
 
-	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"No longer a file path"}]}]';
-	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
+	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJson, @Actual = @actualJson;
+
 END;

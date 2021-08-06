@@ -1,12 +1,14 @@
 
-CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_true_translates_output]
+CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_true_skips_dumps]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
 	-- Arrange:
 	-----------------------------------------------------------------------------------------------------------------
+	-- create canned audit records:
 	EXEC [tSQLt].[FakeTable] 
-		@TableName = N'dda.audits';
+		@TableName = N'audits', 
+		@SchemaName = N'dda';
 	
 	INSERT INTO dda.[audits] (
 		[audit_id],
@@ -21,31 +23,15 @@ BEGIN
 	)
 	VALUES	
 	(
-		88,
-		'2021-03-12 10:43:09.250',
+		9919,
+		'2021-01-28 15:37:41.667',
 		N'dbo', 
-		N'FilePaths', 
-		'mikec', 
-		'INSERT', 
-		31407, 
+		N'Errors', 
+		'bilbo', 
+		'MUTATE',   -- not yet implemented but ... shouldn't cause problems with this test. 
+		34827897, 
 		1, 
-		N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Dropbox\\Repositories\\dda\\core"}]}]'
-	);
-
-	-- value translations:
-	EXEC [tSQLt].[FakeTable] @TableName = N'dda.translation_values', @Identity = 1;
-	INSERT INTO dda.[translation_values] (
-		[table_name],
-		[column_name],
-		[key_value],
-		[translation_value]
-	)
-	VALUES	
-	(
-		N'dbo.FilePaths',
-		N'FilePath',
-		N'D:\Dropbox\Repositories\dda\core',
-		N'No longer a file path'
+		N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":[{"ErrorID":32,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":31,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":30,"Severity":"122","ErrorMessage":"Test Error Here"}],"inserted":[{"ErrorID":132,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":131,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":130,"Severity":"122","ErrorMessage":"Test Error Here"}]}]}]' 
 	);
 
 	DROP TABLE IF EXISTS #search_output;
@@ -79,8 +65,9 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@StartAuditID = 88, 
-		@TransformOutput = 1;
+		@TargetUsers = N'bilbo',
+		@TransformOutput = 0,
+		@StartAuditID = 9919;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
@@ -91,6 +78,7 @@ BEGIN
 
 	DECLARE @row1_json nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
 
-	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"No longer a file path"}]}]';
+	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":[{"ErrorID":32,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":31,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":30,"Severity":"122","ErrorMessage":"Test Error Here"}],"inserted":[{"ErrorID":132,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":131,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":130,"Severity":"122","ErrorMessage":"Test Error Here"}]}]}]';
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
+
 END;

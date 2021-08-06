@@ -31,7 +31,7 @@ BEGIN
 		'MUTATE',   -- not yet implemented but ... shouldn't cause problems with this test. 
 		34827897, 
 		1, 
-		N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":[{"ErrorID":32,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":31,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":30,"Severity":"122","ErrorMessage":"Test Error Here"}],"inserted":[{"ErrorID":132,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":131,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":130,"Severity":"122","ErrorMessage":"Test Error Here"}]}]}]' 
+		N'[{"key":[{}],"detail":[{}],"dump":[{"deleted":[{"ErrorID":32,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":31,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":30,"Severity":"122","ErrorMessage":"Test Error Here"}],"inserted":[{"ErrorID":132,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":131,"Severity":"122","ErrorMessage":"Test Error Here"},{"ErrorID":130,"Severity":"122","ErrorMessage":"Test Error Here"}]}]}]'
 	);
 
 	DROP TABLE IF EXISTS #search_output;
