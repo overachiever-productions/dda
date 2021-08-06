@@ -706,7 +706,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -741,7 +741,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -813,7 +813,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -882,7 +882,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -992,7 +992,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1032,7 +1032,7 @@ GO
 CREATE FUNCTION dda.[extract_custom_trigger_logic](@TriggerName sysname)
 RETURNS @output table ([definition] nvarchar(MAX) NULL) 
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @body nvarchar(MAX); 
@@ -1093,7 +1093,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN /* @context is randomized/uniquified during deployment ... */
@@ -1295,7 +1295,7 @@ AS
 				INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
 		)
 
-		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 1) THEN 1 ELSE 0 END;'
 
 		EXEC sp_executesql 
 			@rotateSQL, 
@@ -1511,7 +1511,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -1656,7 +1656,7 @@ FOR JSON PATH);
 		IF @StartTransactionID LIKE N'%-%' BEGIN 
 			SELECT @year = LEFT(@StartTransactionID, 4);
 			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
-			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+			SET @startTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@StartTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 
 			SET @txDate = CAST(CAST(@year AS sysname) + N'-01-01' AS datetime);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
@@ -1668,7 +1668,7 @@ FOR JSON PATH);
 
 		IF @EndTransactionID IS NOT NULL BEGIN 
 			IF @EndTransactionID LIKE N'%-%' BEGIN 
-				SET @endTx = RIGHT(@EndTransactionID, 9);
+				SET @endTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@EndTransactionID, N'-', 1) WHERE [row_id] = 3) AS int);
 			  END; 
 			ELSE BEGIN 
 				SET @endTx = TRY_CAST(@EndTransactionID AS int);
@@ -1685,7 +1685,11 @@ FOR JSON PATH);
 			RETURN -80;
 		END;
 
-		IF @txDate IS NOT NULL BEGIN 
+		IF @txDate IS NULL BEGIN 
+			RAISERROR(N'Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.', 16, 1);
+			RETURN -81;
+		  END;
+		ELSE BEGIN 
 			SET @transactionIdClause = @transactionIdClause + N' AND [timestamp] >= ''' + CONVERT(sysname, @txDate, 121) + N''' AND [timestamp] < ''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''';
 		END;
 		
@@ -1971,7 +1975,8 @@ FOR JSON PATH);
 		CROSS APPLY OPENJSON([z].[Value], N'$') y
 	WHERE 
 		[y].[Type] = 5 AND
-		[y].[Value] LIKE '%from":%"to":%';
+		[y].[Value] LIKE '%from":%"to":%'
+	OPTION (MAXDOP 1);
 
 	WITH [from_to] AS ( 
 
@@ -2165,7 +2170,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value], 
 			[x].[value_type],
 			[x].[node_id] 
 		FROM 
@@ -2178,7 +2183,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value],
 			[x].[value_type]
 		FROM 
 			froms f 
@@ -2214,6 +2219,14 @@ FOR JSON PATH);
 	FROM 
 		[#scalar] x 
 		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
+
+	/* Re-encode de-encoded (or non-encoded (translation)) JSON: */
+	UPDATE [#nodes] 
+	SET 
+		[original_value] = CASE WHEN [original_value_type] = 1 THEN STRING_ESCAPE([original_value], 'json') ELSE [original_value] END, 
+		[translated_value] = CASE WHEN [translated_value_type] = 1 THEN STRING_ESCAPE([translated_value], 'json') ELSE [translated_value] END
+	WHERE 
+		ISNULL([translated_value_type], [original_value_type]) = 1; 
 
 	/* Serialize Details (for non UPDATEs - they've already been handled above) */
 	WITH [flattened] AS ( 
@@ -2328,7 +2341,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE [translated_json] END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE ISNULL([translated_json], [change_details]) END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
@@ -2355,7 +2368,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -2500,7 +2513,7 @@ FOR JSON PATH);
 		IF @StartTransactionID LIKE N''%-%'' BEGIN 
 			SELECT @year = LEFT(@StartTransactionID, 4);
 			SELECT @doy = SUBSTRING(@StartTransactionID, 6, 3);
-			SELECT @startTx = RIGHT(@StartTransactionID, 9);
+			SET @startTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@StartTransactionID, N''-'', 1) WHERE [row_id] = 3) AS int);
 
 			SET @txDate = CAST(CAST(@year AS sysname) + N''-01-01'' AS datetime);
 			SET @txDate = DATEADD(DAY, @doy - 1, @txDate);
@@ -2512,7 +2525,7 @@ FOR JSON PATH);
 
 		IF @EndTransactionID IS NOT NULL BEGIN 
 			IF @EndTransactionID LIKE N''%-%'' BEGIN 
-				SET @endTx = RIGHT(@EndTransactionID, 9);
+				SET @endTx = TRY_CAST((SELECT [result] FROM dda.[split_string](@EndTransactionID, N''-'', 1) WHERE [row_id] = 3) AS int);
 			  END; 
 			ELSE BEGIN 
 				SET @endTx = TRY_CAST(@EndTransactionID AS int);
@@ -2529,7 +2542,11 @@ FOR JSON PATH);
 			RETURN -80;
 		END;
 
-		IF @txDate IS NOT NULL BEGIN 
+		IF @txDate IS NULL BEGIN 
+			RAISERROR(N''Invalid @StartTransaction Specified. Specify either the exact (integer) ID from dda.audits.transaction_id OR a formatted dddd-doy-####### value as provided by dda.get_audit_data.'', 16, 1);
+			RETURN -81;
+		  END;
+		ELSE BEGIN 
 			SET @transactionIdClause = @transactionIdClause + N'' AND [timestamp] >= '''''' + CONVERT(sysname, @txDate, 121) + N'''''' AND [timestamp] < '''''' + CONVERT(sysname, DATEADD(DAY, 1, @txDate), 121) + N'''''''';
 		END;
 		
@@ -2815,7 +2832,8 @@ FOR JSON PATH);
 		CROSS APPLY OPENJSON([z].[Value], N''$'') y
 	WHERE 
 		[y].[Type] = 5 AND
-		[y].[Value] LIKE ''%from":%"to":%'';
+		[y].[Value] LIKE ''%from":%"to":%''
+	OPTION (MAXDOP 1);
 
 	WITH [from_to] AS ( 
 
@@ -2873,7 +2891,6 @@ FOR JSON PATH);
 		LEFT OUTER JOIN dda.[translation_columns] c ON [x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[table_name] AND [x].[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[column_name]
 	WHERE 
 		x.[translated_column] IS NULL; 
-
 
 	CREATE TABLE #translation_key_values (
 		[row_id] int IDENTITY(1,1) NOT NULL, 
@@ -3009,7 +3026,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], ''json'') ELSE [x].[value] END [value], 
 			[x].[value_type],
 			[x].[node_id] 
 		FROM 
@@ -3022,7 +3039,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], ''json'') ELSE [x].[value] END [value],
 			[x].[value_type]
 		FROM 
 			froms f 
@@ -3059,6 +3076,13 @@ FOR JSON PATH);
 		[#scalar] x 
 		INNER JOIN [aggregated] a ON x.[row_number] = a.[row_number] AND x.[json_row_id] = a.[json_row_id];
 
+	/* Re-encode de-encoded (or non-encoded (translation)) JSON: */
+	UPDATE [#nodes] 
+	SET 
+		[original_value] = CASE WHEN [original_value_type] = 1 THEN STRING_ESCAPE([original_value], ''json'') ELSE [original_value] END, 
+		[translated_value] = CASE WHEN [translated_value_type] = 1 THEN STRING_ESCAPE([translated_value], ''json'') ELSE [translated_value] END
+	WHERE 
+		ISNULL([translated_value_type], [original_value_type]) = 1; 
 
 	/* Serialize Details (for non UPDATEs - they''ve already been handled above) */
 	WITH [flattened] AS ( 
@@ -3084,7 +3108,6 @@ FOR JSON PATH);
 		GROUP BY 
 			[row_number],
 			[json_row_id]
-
 	)
 
 	UPDATE x 
@@ -3163,6 +3186,7 @@ FOR JSON PATH);
 		x.[translated_json] IS NULL;
 
 Final_Projection: 
+
 	SELECT 
 		[row_number],
 		[total_rows],
@@ -3173,7 +3197,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N''-'', RIGHT(N''000'' + DATENAME(DAYOFYEAR, [timestamp]), 3), N''-'', RIGHT(N''000000000'' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N''%,"dump":%'' THEN [change_details] ELSE [translated_json] END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N''%,"dump":%'' THEN [change_details] ELSE ISNULL([translated_json], [change_details]) END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
@@ -3199,7 +3223,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	WITH core AS ( 
 		SELECT 
@@ -3259,7 +3283,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3412,7 +3436,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3834,7 +3858,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4111,7 +4135,7 @@ CREATE PROC dda.[disable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4250,7 +4274,7 @@ CREATE PROC dda.[enable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4664,7 +4688,7 @@ CREATE PROC dda.[set_bypass_triggers_on]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4727,7 +4751,7 @@ CREATE PROC dda.[set_bypass_triggers_off]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4750,8 +4774,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'5.2.3666.1';
-DECLARE @VersionDescription nvarchar(200) = N'Sticky CONTEXT_INFO() values; Bug-Fix to ROTATE identification.';
+DECLARE @CurrentVersion varchar(20) = N'5.4.3704.1';
+DECLARE @VersionDescription nvarchar(200) = N'Transformation and JSON-encoding bug-fixes.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])

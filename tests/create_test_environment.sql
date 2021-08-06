@@ -14,7 +14,6 @@ IF NOT EXISTS (SELECT DB_ID('dda_test')) BEGIN
 END;
 GO
 
-
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 1. Deploy tSQLt... 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
@@ -65,8 +64,17 @@ IF OBJECT_ID(N'dbo.SortTable', N'U') IS NULL BEGIN
 		@SurrogateKeys = N'OrderID';
 END;
 
+IF OBJECT_ID(N'dbo.FilePaths', N'U') IS NULL BEGIN 
+	CREATE TABLE dbo.FilePaths (
+		FilePathId int IDENTITY(1,1) NOT NULL, 
+		FilePath sysname NOT NULL, 
+		CONSTRAINT PK_FilePaths PRIMARY KEY CLUSTERED ([FilePathId]) 
+	); 
 
+	EXEC dda.[enable_table_auditing]
+		@TargetTable = N'FilePaths';
 
+END;
 
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------

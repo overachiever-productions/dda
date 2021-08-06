@@ -1,51 +1,31 @@
 
-CREATE OR ALTER PROCEDURE [projection].[test transformoutput_to_true_translates_output]
+CREATE OR ALTER PROCEDURE [projection].[test json_encoded_data_is_re-encoded]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
 	-- Arrange:
 	-----------------------------------------------------------------------------------------------------------------
 	EXEC [tSQLt].[FakeTable] 
-		@TableName = N'dda.audits';
+		@TableName = N'dda.audits', 
+		@Identity = 1;
 	
-	INSERT INTO dda.[audits] (
-		[audit_id],
-		[timestamp],
-		[schema],
-		[table],
-		[user],
-		[operation],
-		[transaction_id],
-		[row_count],
-		[audit]
-	)
-	VALUES	
-	(
-		88,
-		'2021-03-12 10:43:09.250',
-		N'dbo', 
-		N'FilePaths', 
-		'mikec', 
-		'INSERT', 
-		31407, 
-		1, 
-		N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Dropbox\\Repositories\\dda\\core"}]}]'
-	);
+	EXEC [tSQLt].[FakeTable] 
+		@TableName = N'dbo.FilePaths', 
+		@Identity = 1;
+	
+	EXEC [tSQLt].[ApplyConstraint] 
+		@TableName = N'dbo.FilePaths', 
+		@ConstraintName = N'PK_FilePaths';
 
-	-- value translations:
-	EXEC [tSQLt].[FakeTable] @TableName = N'dda.translation_values', @Identity = 1;
-	INSERT INTO dda.[translation_values] (
-		[table_name],
-		[column_name],
-		[key_value],
-		[translation_value]
+	EXEC [tSQLt].[ApplyTrigger] 
+		@TableName = N'dbo.FilePaths', 
+		@TriggerName = N'ddat_FilePaths';
+	
+	INSERT INTO dbo.[FilePaths] (
+		[FilePath]
 	)
-	VALUES	
-	(
-		N'dbo.FilePaths',
-		N'FilePath',
-		N'D:\Dropbox\Repositories\dda\core',
-		N'No longer a file path'
+	VALUES	(
+		N'D:\Dropbox\Repositories\dda\core'
 	);
 
 	DROP TABLE IF EXISTS #search_output;
@@ -66,31 +46,35 @@ BEGIN
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
 	-----------------------------------------------------------------------------------------------------------------
+
 	INSERT INTO [#search_output] (
 		[row_number],
 		[total_rows],
 		[audit_id],
 		[timestamp],
 		[user],
-		[table],
 		[transaction_id],
+		[table],
 		[operation_type],
 		[row_count],
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@StartAuditID = 88, 
-		@TransformOutput = 1;
+		@StartAuditID = 1;	
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
-
-	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]); 
+	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]);
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
-	DECLARE @row1_json nvarchar(MAX) = (SELECT change_details FROM [#search_output] WHERE [row_number] = 1);
+	DECLARE @expectedJson nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"D:\\Dropbox\\Repositories\\dda\\core"}]}]';
 
-	DECLARE @expectedJSON nvarchar(MAX) = N'[{"key":[{"FilePathId":1}],"detail":[{"FilePathId":1,"FilePath":"No longer a file path"}]}]';
-	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJSON, @Actual = @row1_json;
+	DECLARE @originaJson nvarchar(MAX) = (SELECT [audit] FROM dda.[audits] WHERE [audit_id] = 1);
+	DECLARE @transformedJson nvarchar(MAX) = (SELECT [change_details] FROM [#search_output] WHERE [row_number] = 1);
+
+	-- verify that if/when there are no translations, that we get 'out' what we put in - i.e., re-encoded JSON: 
+	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJson, @Actual = @originaJson;
+	EXEC [tSQLt].[AssertEqualsString] @Expected = @expectedJson, @Actual = @transformedJson;
+
 END;
