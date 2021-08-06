@@ -717,7 +717,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value], 
 			[x].[value_type],
 			[x].[node_id] 
 		FROM 
@@ -730,7 +730,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value],
 			[x].[value_type]
 		FROM 
 			froms f 
@@ -888,7 +888,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE [translated_json] END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE ISNULL([translated_json], [change_details]) END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
@@ -1573,7 +1573,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value], 
 			[x].[value_type],
 			[x].[node_id] 
 		FROM 
@@ -1586,7 +1586,7 @@ FOR JSON PATH);
 			[x].[column_name],
 			[x].[row_number],
 			[x].[json_row_id],
-			[x].[value],
+			CASE WHEN [x].[value_type] = 1 THEN STRING_ESCAPE([x].[value], 'json') ELSE [x].[value] END [value],
 			[x].[value_type]
 		FROM 
 			froms f 
@@ -1733,6 +1733,7 @@ FOR JSON PATH);
 		x.[translated_json] IS NULL;
 
 Final_Projection: 
+
 	SELECT 
 		[row_number],
 		[total_rows],
@@ -1743,7 +1744,7 @@ Final_Projection:
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
 		[row_count],
-		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE [translated_json] END [change_details] 
+		CASE WHEN [translated_json] IS NULL AND [change_details] LIKE N'%,"dump":%' THEN [change_details] ELSE ISNULL([translated_json], [change_details]) END [change_details] 
 	FROM 
 		[#raw_data]
 	ORDER BY 
