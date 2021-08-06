@@ -102,7 +102,8 @@ BEGIN
 		[change_details] nvarchar(max) NULL, 
 	);
 
-	--EXEC [tSQLt].[ExpectException];
+	EXEC [tSQLt].[ExpectException]
+		@ExpectedMessagePattern = N'%Invalid @StartTransaction Specified. %';
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
@@ -120,8 +121,8 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@StartTransactionID = 3331400, 
-		@EndTransactionID = 55531900;
+		@StartTransactionID = N'3331400', 
+		@EndTransactionID = N'55531900';
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
