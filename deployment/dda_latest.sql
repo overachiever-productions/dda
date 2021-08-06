@@ -706,7 +706,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -741,7 +741,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -813,7 +813,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -882,7 +882,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -992,7 +992,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1032,7 +1032,7 @@ GO
 CREATE FUNCTION dda.[extract_custom_trigger_logic](@TriggerName sysname)
 RETURNS @output table ([definition] nvarchar(MAX) NULL) 
 AS 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @body nvarchar(MAX); 
@@ -1093,7 +1093,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN /* @context is randomized/uniquified during deployment ... */
@@ -1295,7 +1295,7 @@ AS
 				INNER JOIN [insert_sums] i2 ON ' + @joinKeys + N'
 		)
 
-		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 0) THEN 0 ELSE 1 END;'
+		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 1) THEN 1 ELSE 0 END;'
 
 		EXEC sp_executesql 
 			@rotateSQL, 
@@ -1511,7 +1511,7 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
@@ -2355,7 +2355,7 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
@@ -3199,7 +3199,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	WITH core AS ( 
 		SELECT 
@@ -3259,7 +3259,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3412,7 +3412,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3834,7 +3834,7 @@ CREATE PROC dda.update_trigger_definitions
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4111,7 +4111,7 @@ CREATE PROC dda.[disable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4250,7 +4250,7 @@ CREATE PROC dda.[enable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4664,7 +4664,7 @@ CREATE PROC dda.[set_bypass_triggers_on]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4727,7 +4727,7 @@ CREATE PROC dda.[set_bypass_triggers_off]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.2.3666.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.2.3673.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4750,8 +4750,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'5.2.3666.1';
-DECLARE @VersionDescription nvarchar(200) = N'Sticky CONTEXT_INFO() values; Bug-Fix to ROTATE identification.';
+DECLARE @CurrentVersion varchar(20) = N'5.2.3673.1';
+DECLARE @VersionDescription nvarchar(200) = N'Bug fix for issue with UPDATE identified as ROTATE.';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
