@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [capture].[test capture_collects_user]
+CREATE OR ALTER PROCEDURE [capture].[test capture_collects_original_login]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -39,7 +39,7 @@ BEGIN
 	DECLARE @rowCount int = (SELECT COUNT(*) FROM dda.[audits]);
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
-	DECLARE @user sysname = (SELECT [user] FROM dda.[audits] WHERE [audit_id] = 1); 
+	DECLARE @user sysname = (SELECT [original_login] FROM dda.[audits] WHERE [audit_id] = 1); 
 	DECLARE @currentUser sysname = ORIGINAL_LOGIN();
 	EXEC [tSQLt].[AssertEqualsString] @Expected = @currentUser, @Actual = @user;
 	 

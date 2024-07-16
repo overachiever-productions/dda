@@ -9,7 +9,7 @@
 				@ToIndex = 20;
 
 			EXEC dda.[get_audit_data]
-				@TargetUsers = N'sa, bilbo',
+				@TargetLogins = N'sa, bilbo',
 				--@TargetTables = N'SortTable,Errors',
 				@TransformOutput = 1,
 				@FromIndex = 20,
@@ -42,10 +42,10 @@ GO
 
 --## NOTE: Conditional Build (i.e., defaults to SQL Server 2016 version (XML-concat vs STRING_AGG()), but ALTERs to STRING_CONCAT on 2017+ instances).
 
-CREATE PROC dda.[get_audit_data]
+CREATE PROC [dda].[get_audit_data]
 	@StartTime					datetime		= NULL, 
 	@EndTime					datetime		= NULL, 
-	@TargetUsers				nvarchar(MAX)	= NULL, 
+	@TargetLogins				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
 	@StartAuditID				int				= NULL,
 	@EndAuditID					int				= NULL,
@@ -60,7 +60,7 @@ AS
 	
 	-- {copyright}
 
-	SET @TargetUsers = NULLIF(@TargetUsers, N'');
+	SET @TargetLogins = NULLIF(@TargetLogins, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
 
@@ -68,7 +68,7 @@ AS
 	SET @EndTransactionID = NULLIF(@EndTransactionID, N'');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
-	SET @ToIndex = ISNULL(@ToIndex, 1);
+	SET @ToIndex = ISNULL(@ToIndex, 100);
 
 	IF @StartTime IS NOT NULL AND @EndTime IS NULL BEGIN 
 		SET @EndTime = DATEADD(MINUTE, 2, GETDATE());
@@ -80,8 +80,8 @@ AS
 	END;
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
-		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
+		IF @TargetLogins IS NULL AND @TargetTables IS NULL BEGIN 
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetLogins, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -138,14 +138,14 @@ FOR JSON PATH);
 		SET @predicated = 1;
 	END;
 
-	IF @TargetUsers IS NOT NULL BEGIN 
-		IF @TargetUsers LIKE N'%,%' BEGIN 
-			SET @users  = N'[user] IN (';
+	IF @TargetLogins IS NOT NULL BEGIN 
+		IF @TargetLogins LIKE N'%,%' BEGIN 
+			SET @users  = N'[original_login] IN (';
 
 			SELECT 
 				@users = @users + N'''' + [result] + N''', '
 			FROM 
-				dda.[split_string](@TargetUsers, N',', 1)
+				dda.[split_string](@TargetLogins, N',', 1)
 			ORDER BY 
 				[row_id];
 
@@ -153,7 +153,7 @@ FOR JSON PATH);
 
 		  END;
 		ELSE BEGIN 
-			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
+			SET @users = N'[original_login] = ''' + @TargetLogins + N''' ';
 		END;
 		
 		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
@@ -268,11 +268,11 @@ FOR JSON PATH);
 		[timestamp] datetime NOT NULL,
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
-		[user] sysname NOT NULL,
+		[original_login] sysname NOT NULL,
 		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
-		[change_details] nvarchar(max) NULL, 
+		[change_details] nvarchar(MAX) NULL, 
 		[translated_json] nvarchar(MAX) NULL
 	);
 
@@ -282,7 +282,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation_type],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -294,7 +294,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[schema] + N'.' + [a].[table] [table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -581,7 +581,6 @@ FOR JSON PATH);
 		LEFT OUTER JOIN dda.[translation_columns] c ON [x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[table_name] AND [x].[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[column_name]
 	WHERE 
 		x.[translated_column] IS NULL; 
-
 
 	CREATE TABLE #translation_key_values (
 		[row_id] int IDENTITY(1,1) NOT NULL, 
@@ -883,7 +882,7 @@ Final_Projection:
 		[total_rows],
 		[audit_id],
 		[timestamp],
-		[user],
+		[original_login],
 		ISNULL([translated_table], [table]) [table],
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
@@ -899,10 +898,10 @@ GO
 
 --##CONDITIONAL_VERSION(> 14.0) 
 
-ALTER PROC dda.[get_audit_data]
+ALTER PROC [dda].[get_audit_data]
 	@StartTime					datetime		= NULL, 
 	@EndTime					datetime		= NULL, 
-	@TargetUsers				nvarchar(MAX)	= NULL, 
+	@TargetLogins				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
 	@StartAuditID				int				= NULL,
 	@EndAuditID					int				= NULL,
@@ -917,7 +916,7 @@ AS
 	
 	-- {copyright}
 
-	SET @TargetUsers = NULLIF(@TargetUsers, N'');
+	SET @TargetLogins = NULLIF(@TargetLogins, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
 
@@ -925,7 +924,7 @@ AS
 	SET @EndTransactionID = NULLIF(@EndTransactionID, N'');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
-	SET @ToIndex = ISNULL(@ToIndex, 1);
+	SET @ToIndex = ISNULL(@ToIndex, 100);
 
 	IF @StartTime IS NOT NULL AND @EndTime IS NULL BEGIN 
 		SET @EndTime = DATEADD(MINUTE, 2, GETDATE());
@@ -937,8 +936,8 @@ AS
 	END;
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
-		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
+		IF @TargetLogins IS NULL AND @TargetTables IS NULL BEGIN 
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetLogins, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -995,14 +994,14 @@ FOR JSON PATH);
 		SET @predicated = 1;
 	END;
 
-	IF @TargetUsers IS NOT NULL BEGIN 
-		IF @TargetUsers LIKE N'%,%' BEGIN 
-			SET @users  = N'[user] IN (';
+	IF @TargetLogins IS NOT NULL BEGIN 
+		IF @TargetLogins LIKE N'%,%' BEGIN 
+			SET @users  = N'[original_login] IN (';
 
 			SELECT 
 				@users = @users + N'''' + [result] + N''', '
 			FROM 
-				dda.[split_string](@TargetUsers, N',', 1)
+				dda.[split_string](@TargetLogins, N',', 1)
 			ORDER BY 
 				[row_id];
 
@@ -1010,7 +1009,7 @@ FOR JSON PATH);
 
 		  END;
 		ELSE BEGIN 
-			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
+			SET @users = N'[original_login] = ''' + @TargetLogins + N''' ';
 		END;
 		
 		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
@@ -1125,7 +1124,7 @@ FOR JSON PATH);
 		[timestamp] datetime NOT NULL,
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
-		[user] sysname NOT NULL,
+		[original_login] sysname NOT NULL,
 		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
@@ -1139,7 +1138,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation_type],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -1151,7 +1150,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[schema] + N'.' + [a].[table] [table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -1739,7 +1738,7 @@ Final_Projection:
 		[total_rows],
 		[audit_id],
 		[timestamp],
-		[user],
+		[original_login],
 		ISNULL([translated_table], [table]) [table],
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],

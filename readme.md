@@ -4,18 +4,15 @@
 > This documentation is a work in progress. Any content [surrounded by square brackets] represents a DRAFT version of documentation.
 
 ## Overview 
-Dynamic Data Audits (DDA) main benefits: 
-1. **Deploy and Forget Triggers**. Stop using brittle boiler-plate triggers that make your eyeballs bleed when you code them - and NEED to be updated every, single, time you make a change to one of your audited tables. DDA tracks INSERT, UPDATE, DELETE operations dynamically - so it doesn't CARE about schema changes. 
-2. **Centralized Audit Storage.** Store all of your audit data in a single table - instead of a distinct `<tableName>Audit` table per each of your audited tables (to (mostly) match the schema of your audited tables). 
-3. **Optimized Search + Translation of Audit Data**. Let your END-USERs view audit data. With ALL audited changes in a single table, tracking down who did what, when, against which table is trivial. Better yet, use an optimized search routine (`dda.get_audit_data`) with pagination support, optimal performance, and the ability to TRANSLATE 'magic numbers' and other 'cruft' in your tables and/or OBFUSCATE the names of sensitive tables/columns for more sensitive data.
+Dynamic Data Audits (DDA) is a T-SQL solution that provides the following benefits:
+1. **Dynamic Triggers**. Instead of using ONE-OFF, static (brittle), triggers for EACH and EVERY table you need to audit, DDA provides a simple, dynamic, approach to tracking changes - which means you NEVER have to worry about ALTERing your triggers each time you make schema changes to your underlying tables. 
+2. **Centralized Data Storage**. All `INSERT`, `UPDATE`, and `DELETE` operations against audited tables are stored (with meta-data) as JSON in a single table - which makes querying for specific modifications or activities a breeze. 
+3. **Optimized Search + Translation of Audit Data**. Better yet, an optimized search routine (`dda.get_audit_data`) not only makes finding changes lightning-fast and easy, but also provides the ability to TRANSLATE 'magic numbers', run FK lookups, and even OBFUSCATE or rewrite not only data but the names of tables and/or columns. (Meaning that you can 'front' audit data to your end-users while obfuscating sensitive details and while also 'translating' internals (like FKs, etc.) to help provide additional context.)
+4. **Native T-SQL Solution**. While DDA does things that'll make you think it's magic, it's just T-SQL. There's no requirement for additional CLR functionality/dlls, outside processes, or anything 'tricky'. Just simple, native, T-SQL. (Which meeans it's great for Azure Sql Database, works perfectly in Amazon SQL Server RDS instances, and runs on Linux or Windows for 'grounded' SQL Server instances.)
 
 ### Considerations
-- **SQL Server 2016+ ONLY.** Relies upon NATIVE JSON support for data storage.
-- **Triggers.** Uses triggers (vs CDC). Triggers are a Bad Idea(TM) when used as a 'shortcut' for implementing business logic. But they're mostly excellent for auditing purposes - except for their NORMALLY brittle nature and challenges with data-storage - both of which are addressed by dda. 
-
-### Known Issue
-- Data capture works perfectly. But there is 1 issue that can occur if/when TRANSLATIONs are defined for search/output. See the [changelog.md](/changelog.md) for more details. 
-
+- **SQL Server 2016+ ONLY**. Relies upon NATIVE JSON support for data storage which ONLY works on versions of SQL Server 2016 or later.
+- **Triggers**. Uses triggers (vs CDC). Triggers are a Bad Idea(TM) when they're used as a 'shortcut' for implementing business logic. But they're mostly excellent for auditing purposes - except for their NORMALLY brittle nature and challenges with data-storage - both of which are addressed by DDA. 
 
 ## Deployment 
 
@@ -24,13 +21,13 @@ Installation involves two main steps: run `dda_latest.sql` against your target d
   
 1. **RUN [`dda_latest.sql`](https://github.com/overachiever-productions/dda/releases/latest/) in your database.** 
     - Grab the [`dda_latest.sql`](https://github.com/overachiever-productions/dda/releases/latest/) file from the [latest releases](https://github.com/overachiever-productions/dda/releases/latest/) folder.
-    - Open the `dda_latest.sql` file in your favorite IDE / etc. 
+    - Open the [`dda_latest.sql`](https://github.com/overachiever-productions/dda/releases/latest/) file in your favorite IDE / etc. 
         - NOTE :zap: make sure you're connected to the DATABASE where you want to deploy dda logic (i.e., that you're not in `master` or some other database where you DON'T want to deploy core dda logic).
-    - Execute the `dda_latest.sql` script in its entirety. It'll create a new `dda` schema in the target/current database, wire up some tables, create a few helper sprocs/udfs, and create a trigger template and a `version_history` table. 
+    - Execute the `dda_latest.sql` script in its entirety. It'll create a new `dda` schema in the target/current database, wire up some tables, create a few helper sprocs/udfs, create a trigger template, and a `version_history` table. 
     - At this point, 'installation' is complete, and you're ready to move on to configuration.
     
 2. **Configure: Enable Auditing against Target Tables.** 
-    - NOTE: Only tables with explicit PKs or 'surrogate PKs' (defined in the `dda.surrogate_keys` table) can be audited. *'Tables' without a PK or surrogate keys aren't 'tables', they're spreadsheets - even if they live in a SQL Server database.*
+    - **NOTE:** :zap: Only tables with explicit PKs or 'surrogate PKs' (defined in the `dda.surrogate_keys` table) can be audited. *'Tables' without a PK or surrogate keys aren't tables, they're ~~spreadsheets~~ heaps.*
     
     - See the instructions in `dda_latest.sql` for more information on how to use either `dda.enable_table_auditing` or `dda.enable_database_auditing` to 'arm' tables for auditing purposes - depending upon whether you want to audit a few tables or all/most of your tables. 
     

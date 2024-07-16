@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [projection].[test targetusers_allow_multiple_users]
+CREATE OR ALTER PROCEDURE [projection].[test targetusers_are_case_insensitive]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -118,12 +118,12 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@TargetLogins = N'sa, sayidk'
+		@TargetLogins = N'miKEc'
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
 	DECLARE @rowCount int = (SELECT COUNT(*) FROM [#search_output]); 
-	EXEC [tSQLt].[AssertEquals] @Expected = 3, @Actual = @rowCount;
+	EXEC [tSQLt].[AssertEquals] @Expected = 2, @Actual = @rowCount;
 
 END;

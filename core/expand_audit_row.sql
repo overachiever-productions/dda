@@ -124,7 +124,6 @@ AS
 	WHERE 
 		[c].[object_id] = OBJECT_ID(@objectName);
 
-
 	CREATE TABLE #json_columns (
 		row_id int IDENTITY(1,1) NOT NULL, 
 		column_name sysname NOT NULL, 
@@ -293,8 +292,8 @@ Here's a similar query against a 3x INSERT against Meddling.dbo.SortTable:
 			r.[table], 
 			r.[total_rows], 
 			r.[operation_type], 
-			' ' [ ], -- divider... 
-			x.*  -- i..e, one entry per 'row'
+			'' '' [ ], -- divider... 
+			x.*  -- i..e, one entry per ''row''
 		FROM 
 			[#results] r
 			INNER JOIN (

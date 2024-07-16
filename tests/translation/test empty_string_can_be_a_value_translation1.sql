@@ -17,7 +17,7 @@ BEGIN
 		[timestamp],
 		[schema],
 		[table],
-		[user],
+		[original_login],
 		[operation],
 		[transaction_id],
 		[row_count],
@@ -60,7 +60,7 @@ BEGIN
 		[total_rows] int NOT NULL, 
 		[audit_id] int NOT NULL,
 		[timestamp] datetime NOT NULL,
-		[user] sysname NOT NULL,
+		[original_login] sysname NOT NULL,
 		[transaction_id] sysname NOT NULL,
 		[table] sysname NOT NULL,
 		[operation_type] char(9) NOT NULL,
@@ -76,7 +76,7 @@ BEGIN
 		[total_rows],
 		[audit_id],
 		[timestamp],
-		[user],
+		[original_login],
 		[table],
 		[transaction_id],
 		[operation_type],
@@ -84,7 +84,7 @@ BEGIN
 		[change_details]
 	)
 	EXEC dda.[get_audit_data]
-		@TargetUsers = N'CORP\CorpBill',
+		@TargetLogins = N'CORP\CorpBill',
 		@TransformOutput = 1,
 		@FromIndex = 1,
 		@ToIndex = 10;

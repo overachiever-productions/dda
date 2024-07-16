@@ -40,7 +40,8 @@ AS
 		[object_id] = (SELECT [parent_object_id] FROM sys.[objects] WHERE [object_id] = @@PROCID);
 
 	DECLARE @auditedTable sysname = QUOTENAME(@schemaName) + N'.' + QUOTENAME(@tableName);
-	DECLARE @currentUser sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
+	DECLARE @originalLogin sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
+	DECLARE @currentUser sysname = USER_NAME(); -- current user - if/when impersonated.
 	DECLARE @auditTimeStamp datetime = GETDATE();  -- all audit info always stored at SERVER time. 
 	DECLARE @rowCount int = -1;
 	DECLARE @txID int = CAST(RIGHT(CAST(CURRENT_TRANSACTION_ID() AS sysname), 9) AS int);
@@ -307,7 +308,8 @@ AS
 		[timestamp],
 		[schema],
 		[table],
-		[user],
+		[original_login],
+		[executing_user],
 		[operation],
 		[transaction_id],
 		[row_count],
@@ -317,6 +319,7 @@ AS
 		@auditTimeStamp, 
 		@schemaName, 
 		@tableName, 
+		@originalLogin,
 		@currentUser,
 		@operationType, 
 		@txID,
