@@ -1,15 +1,28 @@
 /*
 	Work in Progress
 		Currently just a list of steps - along with SOME scripts. 
-		Eventually this'll be a BUIILD script in its own right... 
+		Eventually this'll be a BUILD script in its own right... 
 
+
+
+	TODO: 
+		- this eventually needs to be a POWERSHELL script that'll: 
+			- take in the name of a SQL Server (instance) + optional creds. 
+			- take in the name of a TARGET database. 
+				- allow a -Force or -Overwrite switch (to nuke/remove the previous). 
+			- create the DB in question. 
+			- then run dda_latest.sql
+			- and... create the test tables I've got in this script
+			- and ... create ALL of the tests (.sql files).
+
+		CUZ... tSQLt - as awesome as it is, occassionally lets TRANSACTIONs leak... 
 
 */
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 0. Create the Database if it doesn't exist, etc. 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-IF NOT EXISTS (SELECT DB_ID('dda_test')) BEGIN 
+IF DB_ID('dda_test') IS NULL BEGIN 
 	CREATE DATABASE dda_test;
 END;
 GO
@@ -18,7 +31,7 @@ GO
 -- 1. Deploy tSQLt... 
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
 -- TODO: implement steps for deploying tSQLt... 
-
+-- best option to do this is via Redgate SQLTest - i.e., just use the GUI. 
 
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -77,6 +90,31 @@ IF OBJECT_ID(N'dbo.FilePaths', N'U') IS NULL BEGIN
 END;
 
 
+IF OBJECT_ID(N'dbo.GapsIslands', N'U') IS NULL BEGIN
+	CREATE TABLE [dbo].[GapsIslands](
+		[ID] int NOT NULL,
+		[SeqNo] int NOT NULL,
+		CONSTRAINT [pk_GapsIslands] PRIMARY KEY CLUSTERED ([ID] ASC, [SeqNo] ASC)
+	);
+
+	EXEC dda.[enable_table_auditing]
+		@TargetTable = N'GapsIslands';
+
+END;
+
+IF OBJECT_ID(N'dbo.KeyOnly', N'U') IS NULL BEGIN
+	CREATE TABLE [dbo].[KeyOnly](
+		[KeyNumber] [int] NOT NULL,
+		CONSTRAINT [PK_KeyOnly] PRIMARY KEY CLUSTERED ([KeyNumber] ASC)
+	);
+
+	EXEC dda.[enable_table_auditing]
+		@TargetTable = N'KeyOnly';
+END;
+
+
+
+
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 4. Create test CLASSES
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
@@ -95,3 +133,25 @@ EXEC [tSQLt].[NewTestClass] @ClassName = N'translation';
 
 -- TODO: 
 --  for each of the folders in the tests folder, open up and run/execute each .sql file (i.e., create each test).
+
+/*
+
+		Import-Module -Name "D:\Dropbox\Repositories\psi" -Force;
+		$creds = New-Object PSCredential("sa", (ConvertTo-SecureString "Pass@word1" -AsPlainText -Force));
+		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\capture" -Filter "*.sql";
+		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
+
+		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\json" -Filter "*.sql";
+		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
+
+		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\projection" -Filter "*.sql";
+		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
+
+		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\translation" -Filter "*.sql";
+		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
+
+
+		#$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\utilities" -Filter "*.sql";
+		#Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
+
+*/

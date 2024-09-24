@@ -1,10 +1,7 @@
 /*
 
 
-		4. and ... then I'll need to change dda.get_audit_data to include a new/optional column for ... e_user 
-			and, might also just? want an option (PREMIUM) where ... we can see JUST rows executed by impersonated logins/users? 
 */
-
 
 IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 
@@ -62,6 +59,7 @@ IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.audi
 		BEGIN TRAN;
 			SET IDENTITY_INSERT dda.audits_new ON;
 
+				DECLARE @ddlChange nvarchar(MAX) = N'
 				INSERT INTO [dda].[audits_new] (
 					[audit_id],
 					[timestamp],
@@ -80,13 +78,15 @@ IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.audi
 					[schema],
 					[table],
 					[user] [original_login], 
-					N'<legacy>' AS [executing_user],
+					N''<legacy>'' AS [executing_user],
 					[operation],
 					[transaction_id],
 					[row_count],
 					[audit] 
 				FROM 
-					dda.[audits];
+					dda.[audits]; ';
+
+				EXEC sys.sp_executesql @ddlChange;
 
 			SET IDENTITY_INSERT dda.audits_new OFF;
 
