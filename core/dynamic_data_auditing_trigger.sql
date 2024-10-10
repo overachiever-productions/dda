@@ -205,14 +205,14 @@ AS
 		SET @rotateSQL = N'			WITH delete_sums AS (
 			SELECT 
 				' + @rawKeys + N', 
-				CHECKSUM(' + @rawColumnNames + N') [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
 			FROM 
 				[#temp_deleted]
 		), 
 		insert_sums AS (
 			SELECT
 				' + @rawKeys + N', 
-				CHECKSUM(' + @rawColumnNames + N') [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
 			FROM 
 				[#temp_inserted]
 		), 

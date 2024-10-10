@@ -1,55 +1,6 @@
-/*
-	Work in Progress
-		Currently just a list of steps - along with SOME scripts. 
-		Eventually this'll be a BUILD script in its own right... 
-
-
-
-	TODO: 
-		- this eventually needs to be a POWERSHELL script that'll: 
-			- take in the name of a SQL Server (instance) + optional creds. 
-			- take in the name of a TARGET database. 
-				- allow a -Force or -Overwrite switch (to nuke/remove the previous). 
-			- create the DB in question. 
-			- then run dda_latest.sql
-			- and... create the test tables I've got in this script
-			- and ... create ALL of the tests (.sql files).
-
-		CUZ... tSQLt - as awesome as it is, occassionally lets TRANSACTIONs leak... 
-
-*/
-
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 0. Create the Database if it doesn't exist, etc. 
+-- 1. Create various tables that can/will be used as mocks:
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-IF DB_ID('dda_test') IS NULL BEGIN 
-	CREATE DATABASE dda_test;
-END;
-GO
-
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 1. Deploy tSQLt... 
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
--- TODO: implement steps for deploying tSQLt... 
--- best option to do this is via Redgate SQLTest - i.e., just use the GUI. 
-
-
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 2. Deploy dda_latest.sql
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-
--- TODO: ... run/execute dda_latest.sql here... 
-
-USE [dda_test];
-GO
-
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 3. Create various tables that can/will be used as mocks:
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-
-USE [dda_test];
-GO
-
 IF OBJECT_ID(N'dbo.login_metric_operation_types', N'U') IS NULL BEGIN
 	CREATE TABLE [dbo].[login_metric_operation_types](
 		[row_id] [int] IDENTITY(1,1) NOT NULL,
@@ -89,12 +40,11 @@ IF OBJECT_ID(N'dbo.FilePaths', N'U') IS NULL BEGIN
 
 END;
 
-
 IF OBJECT_ID(N'dbo.GapsIslands', N'U') IS NULL BEGIN
 	CREATE TABLE [dbo].[GapsIslands](
 		[ID] int NOT NULL,
 		[SeqNo] int NOT NULL,
-		CONSTRAINT [pk_GapsIslands] PRIMARY KEY CLUSTERED ([ID] ASC, [SeqNo] ASC)
+		CONSTRAINT [PK_GapsIslands] PRIMARY KEY CLUSTERED ([ID] ASC, [SeqNo] ASC)
 	);
 
 	EXEC dda.[enable_table_auditing]
@@ -111,12 +61,12 @@ IF OBJECT_ID(N'dbo.KeyOnly', N'U') IS NULL BEGIN
 	EXEC dda.[enable_table_auditing]
 		@TargetTable = N'KeyOnly';
 END;
-
+GO
 
 
 
 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 4. Create test CLASSES
+-- 2. Create test CLASSES
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
 -- TODO: make these calls idempotent:
@@ -124,34 +74,5 @@ EXEC [tSQLt].[NewTestClass] @ClassName = N'capture';
 EXEC [tSQLt].[NewTestClass] @ClassName = N'json';
 EXEC [tSQLt].[NewTestClass] @ClassName = N'projection';
 EXEC [tSQLt].[NewTestClass] @ClassName = N'translation';
---EXEC [tSQLt].[NewTestClass] @ClassName = N'utilities';
-
-
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
--- 5. Import/create Tests
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
-
--- TODO: 
---  for each of the folders in the tests folder, open up and run/execute each .sql file (i.e., create each test).
-
-/*
-
-		Import-Module -Name "D:\Dropbox\Repositories\psi" -Force;
-		$creds = New-Object PSCredential("sa", (ConvertTo-SecureString "Pass@word1" -AsPlainText -Force));
-		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\capture" -Filter "*.sql";
-		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
-
-		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\json" -Filter "*.sql";
-		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
-
-		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\projection" -Filter "*.sql";
-		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
-
-		$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\translation" -Filter "*.sql";
-		Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
-
-
-		#$files = Get-ChildItem -Path "D:\Dropbox\Repositories\dda\tests\utilities" -Filter "*.sql";
-		#Invoke-PsiCommand -SqlInstance "dev.sqlserver.id" -Database "dda_test" -File $files -SqlCredential $creds;
-
-*/
+EXEC [tSQLt].[NewTestClass] @ClassName = N'utilities';
+GO

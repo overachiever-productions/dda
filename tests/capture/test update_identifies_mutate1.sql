@@ -13,6 +13,10 @@ BEGIN
 		@TableName = N'dbo.GapsIslands', 
 		@Identity = 1;
 
+	EXEC [tSQLt].[ApplyConstraint]
+		@TableName =  N'dbo.GapsIslands',
+		@ConstraintName = 'PK_GapsIslands';
+
 	EXEC [tSQLt].[ApplyTrigger] 
 		@TableName = N'dbo.GapsIslands', 
 		@TriggerName = N'ddat_GapsIslands';

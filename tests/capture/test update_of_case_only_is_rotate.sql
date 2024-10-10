@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [capture].[test update_vs_single_row_as_mutate_is_update]
+CREATE OR ALTER PROCEDURE [capture].[test update_of_case_only_is_rotate]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -10,16 +10,12 @@ BEGIN
 		@Identity = 1;
 	
 	EXEC [tSQLt].[FakeTable] 
-		@TableName = N'dbo.GapsIslands', 
+		@TableName = N'dbo.SortTable', 
 		@Identity = 1;
 
-	EXEC [tSQLt].[ApplyConstraint]
-		@TableName =  N'dbo.GapsIslands',
-		@ConstraintName = 'PK_GapsIslands';
-
 	EXEC [tSQLt].[ApplyTrigger] 
-		@TableName = N'dbo.GapsIslands', 
-		@TriggerName = N'ddat_GapsIslands';
+		@TableName = N'dbo.SortTable', 
+		@TriggerName = N'ddat_SortTable';
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Act: 
@@ -27,52 +23,65 @@ BEGIN
 	WITH multiples AS ( 
 
 		SELECT 
-			1 [ID], 
-			18 [SeqNo]
+			27 [CustomerID], 
+			GETDATE() [OrderDate], 
+			999.99 [Value], 
+			'xxxx_xxxx' [ColChar]
 
 		UNION ALL  
 
 		SELECT 
-			2 [ID], 
-			48 [SeqNo]
+			28 [CustomerID], 
+			GETDATE() [OrderDate], 
+			999.99 [Value], 
+			'yyyy_yyyy' [ColChar]
 
 		UNION ALL 
 		
 		SELECT 
-			3 [ID], 
-			124 [SeqNo]
+			30 [CustomerID], 
+			GETDATE() [OrderDate], 
+			999.99 [Value], 
+			'zzzzz_zzzz' [ColChar]
 
 		UNION ALL 
 		
 		SELECT 
-			4 [ID], 
-			189 [SeqNo]
+			30 [CustomerID], 
+			GETDATE() [OrderDate], 
+			999.99 [Value], 
+			'aaaa_aaaa' [ColChar]
 	)
 
-	INSERT INTO [dbo].[GapsIslands] (
-		[ID],
-		[SeqNo]
+	INSERT INTO [dbo].[SortTable] (
+		[CustomerID],
+		[OrderDate],
+		[Value],
+		[ColChar]
 	)
 	SELECT 
-		[ID], 
-		[SeqNo]
+		[CustomerID],
+		[OrderDate],
+		[Value],
+		[ColChar] 
 	FROM 
 		[multiples];	
 
-	UPDATE dbo.GapsIslands 
+	/* The ONLY change happening here is a CHANGE from lcase to UCASE... */
+	UPDATE dbo.[SortTable] 
 	SET 
-		[SeqNo] = 87
+		[ColChar] = UPPER([ColChar]) 
 	WHERE 
-		[ID] = 2;
+		[CustomerID] = 27;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
-
+	
 	DECLARE @rowCount int = (SELECT [row_count] FROM dda.[audits] WHERE [audit_id] = 2);
 	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
 	DECLARE @operation sysname = (SELECT [operation] FROM dda.[audits] WHERE [audit_id] = 2);
-	EXEC [tSQLt].[AssertEqualsString] @Expected = N'UPDATE', @Actual = @operation;	
+	EXEC [tSQLt].[AssertEqualsString] @Expected = N'UPDATE', @Actual = @operation;
 
 END;
