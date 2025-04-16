@@ -4,7 +4,8 @@ DROP PROC IF EXISTS dda.update_trigger_definitions;
 GO 
 
 CREATE PROC dda.update_trigger_definitions 
-	@PrintOnly				bit				= 1			-- default to NON-modifying execution (i.e., require explicit change to modify).
+	@PrintOnly				bit				= 1, 			-- default to NON-modifying execution (i.e., require explicit change to modify).
+	@ForceUpdates			bit				= 0				-- by default, update_trigger_definitions SKIPS anything already AT the target version # ... @ForceUpdates forces logic overwrite/updates ALWAYS.
 AS 
 	SET NOCOUNT ON; 
 
@@ -192,7 +193,7 @@ AS
 					EXEC sp_executesql 
 						@sql;
 
-					IF @triggerVersion <> @latestVersion BEGIN 
+					IF (@triggerVersion <> @latestVersion) OR (@ForceUpdates = 1) BEGIN 
 						
 						SELECT 
 							@triggerSchemaName = PARSENAME(@tableName, 2), 

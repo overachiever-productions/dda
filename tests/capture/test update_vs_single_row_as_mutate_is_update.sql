@@ -1,5 +1,5 @@
 
-CREATE OR ALTER PROCEDURE [capture].[test update_identifies_mutate]
+CREATE OR ALTER PROCEDURE [capture].[test update_vs_single_row_as_mutate_is_update]
 AS
 BEGIN
   	-----------------------------------------------------------------------------------------------------------------
@@ -12,6 +12,10 @@ BEGIN
 	EXEC [tSQLt].[FakeTable] 
 		@TableName = N'dbo.GapsIslands', 
 		@Identity = 1;
+
+	EXEC [tSQLt].[ApplyConstraint]
+		@TableName =  N'dbo.GapsIslands',
+		@ConstraintName = 'PK_GapsIslands';
 
 	EXEC [tSQLt].[ApplyTrigger] 
 		@TableName = N'dbo.GapsIslands', 
@@ -57,19 +61,18 @@ BEGIN
 
 	UPDATE dbo.GapsIslands 
 	SET 
-		ID = ID + 100, 
-		[SeqNo] = [SeqNo] - 100
+		[SeqNo] = 87
 	WHERE 
-		[ID] IN (1, 2, 3);
+		[ID] = 2;
 
 	-----------------------------------------------------------------------------------------------------------------
 	-- Assert: 
 	-----------------------------------------------------------------------------------------------------------------
 
 	DECLARE @rowCount int = (SELECT [row_count] FROM dda.[audits] WHERE [audit_id] = 2);
-	EXEC [tSQLt].[AssertEquals] @Expected = 3, @Actual = @rowCount;
+	EXEC [tSQLt].[AssertEquals] @Expected = 1, @Actual = @rowCount;
 
 	DECLARE @operation sysname = (SELECT [operation] FROM dda.[audits] WHERE [audit_id] = 2);
-	EXEC [tSQLt].[AssertEqualsString] @Expected = N'MUTATE', @Actual = @operation;	
+	EXEC [tSQLt].[AssertEqualsString] @Expected = N'UPDATE', @Actual = @operation;	
 
 END;

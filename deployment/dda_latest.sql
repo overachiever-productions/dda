@@ -116,15 +116,6 @@
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
 
-USE [your_db_here];
-GO
-
-IF DB_NAME() <> 'your_db_here' BEGIN
-	-- Throw an error and TERMINATE the connection (to avoid execution in the WRONG database (master, etc.)
-	RAISERROR('Please make sure you''re in your target database - i.e., change directives in Section 0 of this script.', 21, 1) WITH LOG;
-END;
-
-
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 1. Create dda schema:
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -647,6 +638,11 @@ END;
 
 
 -----------------------------------
+/*
+
+
+*/
+
 IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 
 	CREATE TABLE dda.audits (
@@ -654,7 +650,8 @@ IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 		[timestamp] datetime NOT NULL CONSTRAINT DF_data_audit_timestamp DEFAULT (GETDATE()), 
 		[schema] sysname NOT NULL, 
 		[table] sysname NOT NULL, 
-		[user] sysname NOT NULL, 
+		[original_login] sysname NOT NULL, 
+		[executing_user] sysname NOT NULL, 
 		[operation] char(9) NOT NULL, 
 		[transaction_id] int NULL,
 		[row_count] int NOT NULL, 
@@ -664,7 +661,9 @@ IF OBJECT_ID('dda.audits', 'U') IS NULL BEGIN
 
 	CREATE CLUSTERED INDEX CLIX_audits_by_timestamp ON dda.[audits] ([timestamp]);
 
-	CREATE NONCLUSTERED INDEX IX_audits_by_user ON dda.[audits] ([user], [timestamp], [schema], [table]);
+	CREATE NONCLUSTERED INDEX IX_audits_by_original_login ON dda.[audits] ([original_login], [timestamp], [schema], [table]);
+
+	CREATE NONCLUSTERED INDEX IX_audits_by_executing_user ON dda.[audits] ([executing_user], [timestamp], [schema], [table]);
 
 	CREATE NONCLUSTERED INDEX IX_audits_by_table ON dda.[audits] ([schema], [table], [timestamp]);
 END;
@@ -676,6 +675,79 @@ END;
 -- v2.0 to v3.0 Update to avoid potential for PK name collisions: 
 IF EXISTS (SELECT NULL FROM sys.[indexes] WHERE [object_id] = OBJECT_ID(N'dda.audits') AND [name] = N'PK_audits' AND [is_primary_key] = 1) BEGIN
 	EXEC sp_rename N'dda.audits.PK_audits', N'PK_dda_audits';
+END;
+
+-- v6 changes to account for impersonation:
+IF EXISTS (SELECT NULL FROM sys.columns WHERE [object_id] = OBJECT_ID(N'dda.audits') AND [name] = N'user') BEGIN
+	CREATE TABLE dda.audits_new (
+		[audit_id] int IDENTITY(1,1) NOT NULL,  
+		[timestamp] datetime NOT NULL CONSTRAINT DF_data_audit_timestamp_new DEFAULT (GETDATE()), 
+		[schema] sysname NOT NULL, 
+		[table] sysname NOT NULL, 
+		[original_login] sysname NOT NULL, 
+		[executing_user] sysname NOT NULL, 
+		[operation] char(9) NOT NULL, 
+		[transaction_id] int NULL,
+		[row_count] int NOT NULL, 
+		[audit] nvarchar(MAX) CONSTRAINT CK_audit_data_data_is_json_new CHECK (ISJSON([audit]) > 0), 
+		CONSTRAINT PK_audits PRIMARY KEY NONCLUSTERED ([audit_id])
+	); 
+
+	CREATE CLUSTERED INDEX CLIX_audits_by_timestamp_new ON dda.[audits_new] ([timestamp]);
+
+	BEGIN TRY 
+		BEGIN TRAN;
+			SET IDENTITY_INSERT dda.audits_new ON;
+
+				DECLARE @ddlChange nvarchar(MAX) = N'
+				INSERT INTO [dda].[audits_new] (
+					[audit_id],
+					[timestamp],
+					[schema],
+					[table],
+					[original_login],
+					[executing_user],
+					[operation],
+					[transaction_id],
+					[row_count],
+					[audit]
+				)
+				SELECT 
+					[audit_id]	,
+					[timestamp],
+					[schema],
+					[table],
+					[user] [original_login], 
+					N''<legacy>'' AS [executing_user],
+					[operation],
+					[transaction_id],
+					[row_count],
+					[audit] 
+				FROM 
+					dda.[audits]; ';
+
+				EXEC sys.sp_executesql @ddlChange;
+
+			SET IDENTITY_INSERT dda.audits_new OFF;
+
+			DROP TABLE [dda].[audits];
+
+			EXEC sp_rename N'dda.audits_new', N'audits';
+			EXEC sp_rename N'dda.audits.CLIX_audits_by_timestamp_new', N'CLIX_audits_by_timestamp', N'INDEX';
+			EXEC sp_rename N'dda.DF_data_audit_timestamp_new', N'DF_data_audit_timestamp', N'OBJECT';
+			EXEC sp_rename N'dda.CK_audit_data_data_is_json_new', N'CK_audit_data_data_is_json', N'OBJECT';
+
+			CREATE NONCLUSTERED INDEX IX_audits_by_original_login ON dda.[audits] ([original_login], [timestamp], [schema], [table]);
+
+			CREATE NONCLUSTERED INDEX IX_audits_by_executing_user ON dda.[audits] ([executing_user], [timestamp], [schema], [table]);
+
+			CREATE NONCLUSTERED INDEX IX_audits_by_table ON dda.[audits] ([schema], [table], [timestamp]);
+
+		COMMIT;
+	END TRY
+	BEGIN CATCH 
+			
+	END CATCH;
 END;
 
 
@@ -706,7 +778,7 @@ GO
 CREATE FUNCTION dda.get_engine_version() 
 RETURNS decimal(4,2)
 AS
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @output decimal(4,2);
@@ -741,7 +813,7 @@ GO
 CREATE FUNCTION [dda].[split_string](@serialized nvarchar(MAX), @delimiter nvarchar(20), @TrimResults bit)
 RETURNS @Results TABLE (row_id int IDENTITY NOT NULL, result nvarchar(MAX))
 AS 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN
 
@@ -813,7 +885,7 @@ GO
 CREATE FUNCTION dda.[translate_modified_columns](@TargetTable sysname, @ChangeMap varbinary(1024)) 
 RETURNS @changes table (column_id int NOT NULL, modified bit NOT NULL, column_name sysname NULL)
 AS 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		SET @TargetTable = NULLIF(@TargetTable, N'');
@@ -882,7 +954,7 @@ CREATE PROC dda.[extract_key_columns]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	DECLARE @columns nvarchar(MAX) = N'';
 	DECLARE @objectName sysname = QUOTENAME(@TargetSchema) + N'.' + QUOTENAME(@TargetTable);
@@ -992,7 +1064,7 @@ CREATE FUNCTION dda.[get_json_data_type] (@value nvarchar(MAX))
 RETURNS tinyint
 AS
     
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
     
     BEGIN; 
 
@@ -1032,7 +1104,7 @@ GO
 CREATE FUNCTION dda.[extract_custom_trigger_logic](@TriggerName sysname)
 RETURNS @output table ([definition] nvarchar(MAX) NULL) 
 AS 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	BEGIN 
 		DECLARE @body nvarchar(MAX); 
@@ -1093,7 +1165,7 @@ AS
 		SET NOCOUNT ON;
 	END; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	DECLARE @context varbinary(128) = ISNULL(CONTEXT_INFO(), 0x0);
 	IF @context = 0x999090000000000000009999 BEGIN /* @context is randomized/uniquified during deployment ... */
@@ -1111,7 +1183,8 @@ AS
 		[object_id] = (SELECT [parent_object_id] FROM sys.[objects] WHERE [object_id] = @@PROCID);
 
 	DECLARE @auditedTable sysname = QUOTENAME(@schemaName) + N'.' + QUOTENAME(@tableName);
-	DECLARE @currentUser sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
+	DECLARE @originalLogin sysname = ORIGINAL_LOGIN();   -- persists across context changes/impersonation.
+	DECLARE @currentUser sysname = USER_NAME(); -- current user - if/when impersonated.
 	DECLARE @auditTimeStamp datetime = GETDATE();  -- all audit info always stored at SERVER time. 
 	DECLARE @rowCount int = -1;
 	DECLARE @txID int = CAST(RIGHT(CAST(CURRENT_TRANSACTION_ID() AS sysname), 9) AS int);
@@ -1275,14 +1348,14 @@ AS
 		SET @rotateSQL = N'			WITH delete_sums AS (
 			SELECT 
 				' + @rawKeys + N', 
-				CHECKSUM(' + @rawColumnNames + N') [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
 			FROM 
 				[#temp_deleted]
 		), 
 		insert_sums AS (
 			SELECT
 				' + @rawKeys + N', 
-				CHECKSUM(' + @rawColumnNames + N') [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
 			FROM 
 				[#temp_inserted]
 		), 
@@ -1378,7 +1451,8 @@ AS
 		[timestamp],
 		[schema],
 		[table],
-		[user],
+		[original_login],
+		[executing_user],
 		[operation],
 		[transaction_id],
 		[row_count],
@@ -1388,6 +1462,7 @@ AS
 		@auditTimeStamp, 
 		@schemaName, 
 		@tableName, 
+		@originalLogin,
 		@currentUser,
 		@operationType, 
 		@txID,
@@ -1463,7 +1538,7 @@ GO
 				@ToIndex = 20;
 
 			EXEC dda.[get_audit_data]
-				@TargetUsers = N'sa, bilbo',
+				@TargetLogins = N'sa, bilbo',
 				--@TargetTables = N'SortTable,Errors',
 				@TransformOutput = 1,
 				@FromIndex = 20,
@@ -1495,10 +1570,10 @@ DROP PROC IF EXISTS dda.[get_audit_data];
 GO
 
 
-CREATE PROC dda.[get_audit_data]
+CREATE PROC [dda].[get_audit_data]
 	@StartTime					datetime		= NULL, 
 	@EndTime					datetime		= NULL, 
-	@TargetUsers				nvarchar(MAX)	= NULL, 
+	@TargetLogins				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
 	@StartAuditID				int				= NULL,
 	@EndAuditID					int				= NULL,
@@ -1511,9 +1586,9 @@ CREATE PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
-	SET @TargetUsers = NULLIF(@TargetUsers, N'');
+	SET @TargetLogins = NULLIF(@TargetLogins, N'');
 	SET @TargetTables = NULLIF(@TargetTables, N'');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
 
@@ -1521,7 +1596,7 @@ AS
 	SET @EndTransactionID = NULLIF(@EndTransactionID, N'');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
-	SET @ToIndex = ISNULL(@ToIndex, 1);
+	SET @ToIndex = ISNULL(@ToIndex, 100);
 
 	IF @StartTime IS NOT NULL AND @EndTime IS NULL BEGIN 
 		SET @EndTime = DATEADD(MINUTE, 2, GETDATE());
@@ -1533,8 +1608,8 @@ AS
 	END;
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
-		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
+		IF @TargetLogins IS NULL AND @TargetTables IS NULL BEGIN 
+			RAISERROR(N'Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetLogins, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -1591,14 +1666,14 @@ FOR JSON PATH);
 		SET @predicated = 1;
 	END;
 
-	IF @TargetUsers IS NOT NULL BEGIN 
-		IF @TargetUsers LIKE N'%,%' BEGIN 
-			SET @users  = N'[user] IN (';
+	IF @TargetLogins IS NOT NULL BEGIN 
+		IF @TargetLogins LIKE N'%,%' BEGIN 
+			SET @users  = N'[original_login] IN (';
 
 			SELECT 
 				@users = @users + N'''' + [result] + N''', '
 			FROM 
-				dda.[split_string](@TargetUsers, N',', 1)
+				dda.[split_string](@TargetLogins, N',', 1)
 			ORDER BY 
 				[row_id];
 
@@ -1606,7 +1681,7 @@ FOR JSON PATH);
 
 		  END;
 		ELSE BEGIN 
-			SET @users = N'[user] = ''' + @TargetUsers + N''' ';
+			SET @users = N'[original_login] = ''' + @TargetLogins + N''' ';
 		END;
 		
 		IF @predicated = 1 SET @users = @newlineAndTabs + N'AND ' + @users;
@@ -1721,11 +1796,11 @@ FOR JSON PATH);
 		[timestamp] datetime NOT NULL,
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
-		[user] sysname NOT NULL,
+		[original_login] sysname NOT NULL,
 		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
-		[change_details] nvarchar(max) NULL, 
+		[change_details] nvarchar(MAX) NULL, 
 		[translated_json] nvarchar(MAX) NULL
 	);
 
@@ -1735,7 +1810,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation_type],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -1747,7 +1822,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[schema] + N'.' + [a].[table] [table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -2034,7 +2109,6 @@ FOR JSON PATH);
 		LEFT OUTER JOIN dda.[translation_columns] c ON [x].[source_table] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[table_name] AND [x].[original_column] COLLATE SQL_Latin1_General_CP1_CI_AS = [c].[column_name]
 	WHERE 
 		x.[translated_column] IS NULL; 
-
 
 	CREATE TABLE #translation_key_values (
 		[row_id] int IDENTITY(1,1) NOT NULL, 
@@ -2336,7 +2410,7 @@ Final_Projection:
 		[total_rows],
 		[audit_id],
 		[timestamp],
-		[user],
+		[original_login],
 		ISNULL([translated_table], [table]) [table],
 		CONCAT(DATEPART(YEAR, [timestamp]), N'-', RIGHT(N'000' + DATENAME(DAYOFYEAR, [timestamp]), 3), N'-', RIGHT(N'000000000' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
@@ -2352,10 +2426,10 @@ GO
 
 
 DECLARE @get_audit_data nvarchar(MAX) = N'
-ALTER PROC dda.[get_audit_data]
+ALTER PROC [dda].[get_audit_data]
 	@StartTime					datetime		= NULL, 
 	@EndTime					datetime		= NULL, 
-	@TargetUsers				nvarchar(MAX)	= NULL, 
+	@TargetLogins				nvarchar(MAX)	= NULL, 
 	@TargetTables				nvarchar(MAX)	= NULL, 
 	@StartAuditID				int				= NULL,
 	@EndAuditID					int				= NULL,
@@ -2368,9 +2442,9 @@ ALTER PROC dda.[get_audit_data]
 AS
     SET NOCOUNT ON;
 	
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
-	SET @TargetUsers = NULLIF(@TargetUsers, N'''');
+	SET @TargetLogins = NULLIF(@TargetLogins, N'''');
 	SET @TargetTables = NULLIF(@TargetTables, N'''');		
 	SET @TransformOutput = ISNULL(@TransformOutput, 1);
 
@@ -2378,7 +2452,7 @@ AS
 	SET @EndTransactionID = NULLIF(@EndTransactionID, N'''');
 
 	SET @FromIndex = ISNULL(@FromIndex, 1);
-	SET @ToIndex = ISNULL(@ToIndex, 1);
+	SET @ToIndex = ISNULL(@ToIndex, 100);
 
 	IF @StartTime IS NOT NULL AND @EndTime IS NULL BEGIN 
 		SET @EndTime = DATEADD(MINUTE, 2, GETDATE());
@@ -2390,8 +2464,8 @@ AS
 	END;
 
 	IF (@StartTime IS NULL AND @EndTime IS NULL) AND (@StartAuditID IS NULL) AND (@StartTransactionID IS NULL) BEGIN
-		IF @TargetUsers IS NULL AND @TargetTables IS NULL BEGIN 
-			RAISERROR(N''Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetUsers, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.'', 16, 1);
+		IF @TargetLogins IS NULL AND @TargetTables IS NULL BEGIN 
+			RAISERROR(N''Queries against Audit data MUST be constrained - either @StartTime [+ @EndTIme], or @TargetLogins, or @TargetTables or @StartAuditID/@StartTransactionIDs - or a combination of time, table, and user constraints.'', 16, 1);
 			RETURN -11;
 		END;
 	END;
@@ -2448,14 +2522,14 @@ FOR JSON PATH);
 		SET @predicated = 1;
 	END;
 
-	IF @TargetUsers IS NOT NULL BEGIN 
-		IF @TargetUsers LIKE N''%,%'' BEGIN 
-			SET @users  = N''[user] IN ('';
+	IF @TargetLogins IS NOT NULL BEGIN 
+		IF @TargetLogins LIKE N''%,%'' BEGIN 
+			SET @users  = N''[original_login] IN ('';
 
 			SELECT 
 				@users = @users + N'''''''' + [result] + N'''''', ''
 			FROM 
-				dda.[split_string](@TargetUsers, N'','', 1)
+				dda.[split_string](@TargetLogins, N'','', 1)
 			ORDER BY 
 				[row_id];
 
@@ -2463,7 +2537,7 @@ FOR JSON PATH);
 
 		  END;
 		ELSE BEGIN 
-			SET @users = N''[user] = '''''' + @TargetUsers + N'''''' '';
+			SET @users = N''[original_login] = '''''' + @TargetLogins + N'''''' '';
 		END;
 		
 		IF @predicated = 1 SET @users = @newlineAndTabs + N''AND '' + @users;
@@ -2578,7 +2652,7 @@ FOR JSON PATH);
 		[timestamp] datetime NOT NULL,
 		[table] sysname NOT NULL,
 		[translated_table] sysname NULL,
-		[user] sysname NOT NULL,
+		[original_login] sysname NOT NULL,
 		[operation_type] char(6) NOT NULL,
 		[transaction_id] int NOT NULL,
 		[row_count] int NOT NULL,
@@ -2592,7 +2666,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation_type],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -2604,7 +2678,7 @@ FOR JSON PATH);
 		[x].[audit_id],
 		[a].[timestamp],
 		[a].[schema] + N''.'' + [a].[table] [table],
-		[a].[user],
+		[a].[original_login],
 		[a].[operation],
 		[a].[transaction_id],
 		[a].[row_count],
@@ -3192,7 +3266,7 @@ Final_Projection:
 		[total_rows],
 		[audit_id],
 		[timestamp],
-		[user],
+		[original_login],
 		ISNULL([translated_table], [table]) [table],
 		CONCAT(DATEPART(YEAR, [timestamp]), N''-'', RIGHT(N''000'' + DATENAME(DAYOFYEAR, [timestamp]), 3), N''-'', RIGHT(N''000000000'' + CAST([transaction_id] AS sysname), 9)) [transaction_id],
 		[operation_type],
@@ -3223,7 +3297,7 @@ CREATE PROC dda.list_dynamic_triggers
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	WITH core AS ( 
 		SELECT 
@@ -3283,7 +3357,7 @@ CREATE PROC dda.enable_table_auditing
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTable = NULLIF(@TargetTable, N'');
 	SET @SurrogateKeys = NULLIF(@SurrogateKeys, N'');
@@ -3436,7 +3510,7 @@ CREATE PROC dda.[enable_database_auditing]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	SET @ExcludedTables = NULLIF(@ExcludedTables, N'');
 	SET @ExcludedSchemas = NULLIF(@ExcludedSchemas, N'');
@@ -3854,11 +3928,12 @@ DROP PROC IF EXISTS dda.update_trigger_definitions;
 GO 
 
 CREATE PROC dda.update_trigger_definitions 
-	@PrintOnly				bit				= 1			-- default to NON-modifying execution (i.e., require explicit change to modify).
+	@PrintOnly				bit				= 1, 			-- default to NON-modifying execution (i.e., require explicit change to modify).
+	@ForceUpdates			bit				= 0				-- by default, update_trigger_definitions SKIPS anything already AT the target version # ... @ForceUpdates forces logic overwrite/updates ALWAYS.
 AS 
 	SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	-- load definition for the NEW trigger:
 	DECLARE @definitionID int; 
@@ -4042,7 +4117,7 @@ AS
 					EXEC sp_executesql 
 						@sql;
 
-					IF @triggerVersion <> @latestVersion BEGIN 
+					IF (@triggerVersion <> @latestVersion) OR (@ForceUpdates = 1) BEGIN 
 						
 						SELECT 
 							@triggerSchemaName = PARSENAME(@tableName, 2), 
@@ -4135,7 +4210,7 @@ CREATE PROC dda.[disable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4274,7 +4349,7 @@ CREATE PROC dda.[enable_dynamic_triggers]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 
 	SET @TargetTriggers = ISNULL(NULLIF(@TargetTriggers, N''), N'{ALL}');
 	SET @ExcludedTriggers = NULLIF(@ExcludedTriggers, N'');
@@ -4688,7 +4763,7 @@ CREATE PROC dda.[set_bypass_triggers_on]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4751,7 +4826,7 @@ CREATE PROC dda.[set_bypass_triggers_off]
 AS
     SET NOCOUNT ON; 
 
-	-- [v5.4.3704.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
+	-- [v5.6.4865.1] - License, Code, & Docs: https://github.com/overachiever-productions/dda/ 
 	
 	/* Disallow Explicit User Transactions - i.e., triggers have to be 'turned on/off' outside of a user-enlisted TX: */
 	IF @@TRANCOUNT > 0 BEGIN 
@@ -4774,8 +4849,8 @@ GO
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- 5. Update version_history with details about current version (i.e., if we got this far, the deployment is successful). 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-DECLARE @CurrentVersion varchar(20) = N'5.4.3704.1';
-DECLARE @VersionDescription nvarchar(200) = N'Transformation and JSON-encoding bug-fixes.';
+DECLARE @CurrentVersion varchar(20) = N'5.6.4865.1';
+DECLARE @VersionDescription nvarchar(200) = N'Testing Build and Deployment';
 DECLARE @InstallType nvarchar(20) = N'Install. ';
 
 IF EXISTS (SELECT NULL FROM dda.[version_history])
