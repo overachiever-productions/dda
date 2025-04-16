@@ -69,10 +69,10 @@ GO
 -- 2. Create test CLASSES
 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- 
 
--- TODO: make these calls idempotent:
-EXEC [tSQLt].[NewTestClass] @ClassName = N'capture';
-EXEC [tSQLt].[NewTestClass] @ClassName = N'json';
-EXEC [tSQLt].[NewTestClass] @ClassName = N'projection';
-EXEC [tSQLt].[NewTestClass] @ClassName = N'translation';
-EXEC [tSQLt].[NewTestClass] @ClassName = N'utilities';
-GO
+---- TODO: make these calls idempotent:
+--EXEC [tSQLt].[NewTestClass] @ClassName = N'capture';
+--EXEC [tSQLt].[NewTestClass] @ClassName = N'json';
+--EXEC [tSQLt].[NewTestClass] @ClassName = N'projection';
+--EXEC [tSQLt].[NewTestClass] @ClassName = N'translation';
+--EXEC [tSQLt].[NewTestClass] @ClassName = N'utilities';
+--GO

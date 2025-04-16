@@ -127,8 +127,7 @@ function Build-DdaTestEnvironment {
 		
 		Write-Host "-------------------------------------------------";
 		Write-Host "tSQLt - Database: ";
-		Write-Host $outcome;
-		
+		Write-Host $outcome
 		
 #		$tSQLtPath = Join-Path -Path $ScriptRoot -ChildPath "tSQLt.server.sql";
 #		$tSQLtResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database "master" -SqlCredential $SqlCredential -File $tSQLtPath -AsObject;
@@ -224,10 +223,62 @@ function Build-DdaTestEnvironment {
 	};
 }
 
+#function Deploy-Tests {
+#	[CmdletBinding()]
+#	param (
+#		[Parameter(Mandatory)]
+#		[string]$TargetSqlServer,
+#		[Parameter(Mandatory)]
+#		[string]$TargetDatabase,
+#		[PSCredential]$SqlCredential,
+#		[Switch]$Force = $false # When true, will DROP/OVERWRITE $TargetDatabase if it already exists. 
+#	);
+#	
+#	begin {
+#		
+#	};
+#	
+#	process {
+#		
+#		$query = @"
+#EXEC [tSQLt].[NewTestClass] @ClassName = N'capture';
+#EXEC [tSQLt].[NewTestClass] @ClassName = N'json';
+#EXEC [tSQLt].[NewTestClass] @ClassName = N'projection';
+#EXEC [tSQLt].[NewTestClass] @ClassName = N'translation';
+#EXEC [tSQLt].[NewTestClass] @ClassName = N'utilities';
+#GO
+#"@
+#		
+#		Write-Host "Creating Test Schemas"
+#		$results = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -Query $query -AsObject;
+#		
+#		
+#		Write-Host "Deploying Capture Tests.";
+#		$files = Get-ChildItem -Path (Join-Path -Path $ProjectRoot -ChildPath "\tests\capture\") -Filter "*.sql";
+#		$testsResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -File $files -AsObject;
+#		
+#		Write-Host "Deploying JSON Tests.";
+#		$files = Get-ChildItem -Path (Join-Path -Path $ProjectRoot -ChildPath "\tests\json\") -Filter "*.sql";
+#		$testsResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -File $files -AsObject;
+#		
+#		$files = Get-ChildItem -Path (Join-Path -Path $ProjectRoot -ChildPath "\tests\projection\") -Filter "*.sql";
+#		$testsResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -File $files -AsObject;
+#		
+#		$files = Get-ChildItem -Path (Join-Path -Path $ProjectRoot -ChildPath "\tests\translation\") -Filter "*.sql";
+#		$testsResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -File $files -AsObject;
+#		
+#		$files = Get-ChildItem -Path (Join-Path -Path $ProjectRoot -ChildPath "\tests\utilities\") -Filter "*.sql";
+#		$testsResults = Invoke-PsiCommand -SqlInstance $TargetSqlServer -Database $TargetDatabase -SqlCredential $SqlCredential -File $files -AsObject;
+#	};
+#	
+#	end {
+#		
+#	};
+#}
 
 $creds = Get-Credential -UserName sa;
 
-Build-DdaTestEnvironment -TargetSqlServer "dev.sqlserver.id" -TargetDatabase "dda_test" -SqlCredential $creds -Force;
-
+# Build-DdaTestEnvironment -TargetSqlServer "dev.sqlserver.id" -TargetDatabase "dda_test" -SqlCredential $creds -Force;
+Deploy-Tests -TargetSqlServer "dev.sqlserver.id" -TargetDatabase "dda_test" -SqlCredential $creds;
 
 
