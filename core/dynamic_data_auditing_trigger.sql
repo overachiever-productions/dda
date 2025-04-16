@@ -201,18 +201,22 @@ AS
 
 		DECLARE @isRotate bit = 0;
 		DECLARE @rotateSQL nvarchar(MAX);
+		DECLARE @rotateTestColumnNames nvarchar(MAX) = @rawColumnNames;
+		IF(@rotateTestColumnNames NOT LIKE N'%,%') BEGIN
+			SET @rotateTestColumnNames = @rotateTestColumnNames + N', ''concat_place_holder''';
+		END;
 
 		SET @rotateSQL = N'			WITH delete_sums AS (
 			SELECT 
 				' + @rawKeys + N', 
-				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rotateTestColumnNames + N')) [changesum]
 			FROM 
 				[#temp_deleted]
 		), 
 		insert_sums AS (
 			SELECT
 				' + @rawKeys + N', 
-				HASHBYTES(''SHA2_512'', CONCAT(' + @rawColumnNames + N')) [changesum]
+				HASHBYTES(''SHA2_512'', CONCAT(' + @rotateTestColumnNames + N')) [changesum]
 			FROM 
 				[#temp_inserted]
 		), 
@@ -226,7 +230,7 @@ AS
 		)
 
 		SELECT @isRotate = CASE WHEN EXISTS (SELECT NULL FROM comparisons WHERE is_rotate = 1) THEN 1 ELSE 0 END;'
-
+		
 		EXEC sp_executesql 
 			@rotateSQL, 
 			N'@isRotate bit OUTPUT', 
